@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSHS CRR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-frame">
+
+  <!-- 화면 1: 시작 화면 -->
+  <section id="screen-start" class="screen screen--center active">
+    <div class="hero">
+      <svg class="hero-illustration" viewBox="0 0 240 170" width="220" height="156">
+        <defs>
+          <linearGradient id="badgeGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ffb27a"/>
+            <stop offset="100%" stop-color="#ff7a47"/>
+          </linearGradient>
+        </defs>
+        <rect x="30" y="26" width="150" height="118" rx="18" fill="#ffffff" stroke="#f0e4da" stroke-width="1.5"/>
+        <circle cx="46" cy="44" r="3.5" fill="#ff9a6b"/>
+        <circle cx="58" cy="44" r="3.5" fill="#8ec0f2"/>
+        <circle cx="70" cy="44" r="3.5" fill="#ffd479"/>
+        <line x1="42" y1="56" x2="168" y2="56" stroke="#f0e4da" stroke-width="1.5"/>
+
+        <rect x="42" y="66" width="58" height="16" rx="8" fill="#ffd9c2"/>
+        <rect x="106" y="66" width="64" height="16" rx="8" fill="#dcebfb"/>
+
+        <rect x="42" y="90" width="70" height="16" rx="8" fill="#dcebfb"/>
+        <rect x="118" y="90" width="52" height="16" rx="8" fill="#fdecc4"/>
+
+        <rect x="42" y="114" width="46" height="16" rx="8" fill="#fdecc4"/>
+        <rect x="94" y="114" width="76" height="16" rx="8" fill="#ffd9c2"/>
+
+        <circle cx="176" cy="34" r="20" fill="url(#badgeGradient)"/>
+        <path d="M176 24 L179 31 L186 34 L179 37 L176 44 L173 37 L166 34 L173 31 Z" fill="#fff"/>
+      </svg>
+    </div>
+
+    <h1 class="app-title">DSHS CRR</h1>
+    <p class="app-tagline">관심 분야를 알려주면, 조건에 맞는 시간표를 찾아드려요</p>
+
+    <div class="flow-steps">
+      <div class="flow-step">
+        <span class="flow-icon flow-icon--a">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 7l2-3h12l2 3M4 7v12a1 1 0 001 1h14a1 1 0 001-1V7" stroke="#f2622c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="2.6" stroke="#f2622c" stroke-width="1.6"/></svg>
+        </span>
+        <span class="flow-label">수강신청표 업로드</span>
+      </div>
+      <span class="flow-arrow">›</span>
+      <div class="flow-step">
+        <span class="flow-icon flow-icon--b">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" fill="#3a7bd5"/></svg>
+        </span>
+        <span class="flow-label">관심 분야 입력</span>
+      </div>
+      <span class="flow-arrow">›</span>
+      <div class="flow-step">
+        <span class="flow-icon flow-icon--c">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="#c98a1c" stroke-width="1.6"/><path d="M3 9.5H21" stroke="#c98a1c" stroke-width="1.6"/><path d="M8 3V6.5M16 3V6.5" stroke="#c98a1c" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <span class="flow-label">시간표 완성</span>
+      </div>
+    </div>
+
+    <button id="btn-start" class="btn btn--primary">시작하기</button>
+  </section>
+
+  <!-- 화면 2: 수강신청표 사진 업로드 -->
+  <section id="screen-upload" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+    </header>
+
+    <div class="step-indicator">
+      <div class="step-dot is-active"><span>1</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>2</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>3</span></div>
+    </div>
+
+    <h2 class="screen-title">수강신청표를 올려주세요</h2>
+    <p class="screen-subtitle">학교에서 나눠준 수강신청표를 사진으로 올려주시면 어떤 과목이 개설되는지 확인하는 데 사용해요. 뒷면이 있다면 모두 올려주세요.</p>
+
+    <input type="file" id="photo-input" accept="image/*" multiple hidden>
+
+    <button type="button" id="btn-add-photo" class="upload-dropzone">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 7l2-3h12l2 3M4 7v12a1 1 0 001 1h14a1 1 0 001-1V7" stroke="#ff7a47" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="3" stroke="#ff7a47" stroke-width="1.6"/></svg>
+      <span>사진 추가하기</span>
+      <span class="upload-dropzone__hint">여러 장을 한 번에 선택할 수 있어요</span>
+    </button>
+
+    <div id="photo-grid" class="photo-grid"></div>
+
+    <button id="btn-upload-next" class="btn btn--primary btn--wide" disabled>다음</button>
+    <p id="upload-hint" class="submit-hint">수강신청표 사진을 1장 이상 올려주세요</p>
+    <button type="button" id="btn-skip-upload" class="link-btn link-btn--center">사진이 없어요, 건너뛸게요</button>
+  </section>
+
+  <!-- 화면 3: 입력 화면 -->
+  <section id="screen-input" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+    </header>
+
+    <div class="step-indicator">
+      <div class="step-dot is-done"><span>✓</span></div>
+      <div class="step-line is-done"></div>
+      <div class="step-dot is-active"><span>2</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>3</span></div>
+    </div>
+
+    <div class="form-card">
+      <div class="field-group">
+        <label class="field-label">학년 · 학기</label>
+        <div class="select-row">
+          <select class="select" id="select-grade">
+            <option>2학년</option>
+            <option>3학년</option>
+          </select>
+          <select class="select" id="select-term">
+            <option>1학기</option>
+            <option>2학기</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">이전 학기에 들은 과목 <span class="field-hint">해당하면 체크</span></label>
+        <p class="field-note">Ⅱ과목·실험과목을 추천받으려면 관련 기초 과목을 미리 들었는지 알아야 해요.</p>
+        <div class="check-row">
+          <label class="check-pill"><input type="checkbox" name="prereq" value="일반물리학Ⅰ"> 일반물리학Ⅰ</label>
+          <label class="check-pill"><input type="checkbox" name="prereq" value="일반화학Ⅰ"> 일반화학Ⅰ</label>
+          <label class="check-pill"><input type="checkbox" name="prereq" value="미적분학Ⅰ"> 미적분학Ⅰ</label>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">관심 분야 <span class="field-hint">중복 선택 가능</span></label>
+        <div class="chip-grid">
+          <button class="chip" data-tag="수학">수학</button>
+          <button class="chip" data-tag="물리">물리</button>
+          <button class="chip" data-tag="화학">화학</button>
+          <button class="chip" data-tag="생명과학">생명과학</button>
+          <button class="chip" data-tag="정보과학">정보과학</button>
+          <button class="chip" data-tag="인문사회">인문사회</button>
+          <button class="chip" data-tag="예술">예술</button>
+          <button class="chip" data-tag="체육">체육</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="dislike-input">비선호 과목/분야 <span class="field-hint">선택 입력</span></label>
+        <div class="tag-input-row">
+          <input type="text" id="dislike-input" class="text-input" placeholder="예: 지구과학" maxlength="12">
+          <button type="button" id="btn-add-dislike" class="btn-add">추가</button>
+        </div>
+        <div id="dislike-list" class="tag-list"></div>
+      </div>
+
+      <div class="field-group field-group--row">
+        <label class="field-label" for="toggle-ap">AP 과목 선호</label>
+        <button id="toggle-ap" class="switch" type="button" role="switch" aria-checked="false">
+          <span class="switch-knob"></span>
+        </button>
+      </div>
+    </div>
+
+    <button id="btn-submit" class="btn btn--primary btn--wide" disabled>시간표 만들기</button>
+    <p id="submit-hint" class="submit-hint">관심 분야를 1개 이상 선택해 주세요</p>
+  </section>
+
+  <!-- 화면 4: 로딩 화면 -->
+  <section id="screen-loading" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+    </header>
+
+    <div class="loading-wrap">
+      <div class="spinner-ring"></div>
+      <p class="loading-text">나에게 맞는 시간표를 찾는 중<span class="dots"><span>.</span><span>.</span><span>.</span></span></p>
+    </div>
+  </section>
+
+  <!-- 화면 5: 결과 화면 -->
+  <section id="screen-result" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+      <button id="btn-restart" class="link-btn">처음으로</button>
+    </header>
+
+    <div id="result-content" class="result-content">
+      <div class="result-placeholder">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="5" width="18" height="16" rx="3" stroke="#ff7a47" stroke-width="1.6"/>
+          <path d="M3 9.5H21" stroke="#ff7a47" stroke-width="1.6"/>
+          <path d="M8 3V6.5M16 3V6.5" stroke="#ff7a47" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <p>AI가 추천한 시간표가 이곳에 표시됩니다</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+  <script src="subjects.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
