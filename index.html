@@ -78,7 +78,7 @@
     </div>
 
     <h1 class="app-title">DSHS CRR</h1>
-    <p class="app-tagline">관심 분야를 알려주면, 조건에 맞는 시간표를 찾아드려요</p>
+    <p class="app-tagline">조건에 맞는 시간표를 추천받고, 선배들의 과목 후기도 확인해 보세요</p>
 
     <div class="flow-steps">
       <div class="flow-step">
@@ -103,7 +103,11 @@
       </div>
     </div>
 
-    <button id="btn-start" class="btn btn--primary">시작하기</button>
+    <div class="start-actions">
+      <button id="btn-start" class="btn btn--primary">수강신청 추천받기</button>
+      <button id="btn-go-write" class="btn btn--ghost">후기 남기기</button>
+      <button id="btn-go-read" class="btn btn--ghost">후기 열람하기</button>
+    </div>
   </section>
 
   <!-- 화면 2: 수강신청표 사진 업로드 -->
@@ -241,6 +245,47 @@
         <p>AI가 추천한 시간표가 이곳에 표시됩니다</p>
       </div>
     </div>
+  </section>
+
+  <!-- 화면: 후기 남기기 (아무 과목이나 골라서 별점·후기 작성) -->
+  <section id="screen-write" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+      <button type="button" class="link-btn" data-go="start">처음으로</button>
+    </header>
+    <h2 class="screen-title">후기 남기기</h2>
+    <p class="screen-subtitle">들었던 과목을 찾아서 별점과 한 줄 후기를 남겨주세요. 익명으로 저장되고, 과목마다 한 번만 남길 수 있어요.</p>
+
+    <input id="write-search" class="text-input pick-search" type="search" placeholder="과목 이름 검색 (예: 물리)">
+    <div id="write-pick" class="pick-list"></div>
+
+    <div id="write-form" class="rate-item write-form" hidden>
+      <div class="rate-item__name"><span id="write-name"></span><span id="write-avg" class="rate-item__avg"></span></div>
+      <div id="write-stars" class="rate-stars">
+        <button type="button" class="star" data-v="1" aria-label="1점">★</button>
+        <button type="button" class="star" data-v="2" aria-label="2점">★</button>
+        <button type="button" class="star" data-v="3" aria-label="3점">★</button>
+        <button type="button" class="star" data-v="4" aria-label="4점">★</button>
+        <button type="button" class="star" data-v="5" aria-label="5점">★</button>
+      </div>
+      <textarea id="write-comment" class="rate-comment" maxlength="500" placeholder="한 줄 후기 (선택, 500자까지)"></textarea>
+      <div class="rate-actions"><span id="write-msg" class="rate-msg"></span><button type="button" id="write-submit" class="rate-submit">등록</button></div>
+    </div>
+  </section>
+
+  <!-- 화면: 후기 열람하기 -->
+  <section id="screen-reviews" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+      <button type="button" class="link-btn" data-go="start">처음으로</button>
+    </header>
+    <h2 class="screen-title">후기 열람하기</h2>
+    <p class="screen-subtitle">다른 학생들이 남긴 별점과 후기를 최신순으로 볼 수 있어요.</p>
+
+    <input id="reviews-search" class="text-input pick-search" type="search" placeholder="과목 이름 검색 (예: 화학)">
+    <select id="reviews-area" class="select reviews-area"><option value="">전체 영역</option></select>
+    <div id="reviews-summary" class="reviews-summary"></div>
+    <div id="reviews-list" class="reviews-list"></div>
   </section>
 
   <!-- 들은 과목 별점 남기기 (아래에서 올라오는 창) -->

@@ -347,6 +347,8 @@ function renderPlan(plan, label) {
 const screens = {
   start: document.getElementById("screen-start"),
   upload: document.getElementById("screen-upload"),
+  write: document.getElementById("screen-write"),
+  reviews: document.getElementById("screen-reviews"),
   input: document.getElementById("screen-input"),
   loading: document.getElementById("screen-loading"),
   result: document.getElementById("screen-result"),
@@ -641,7 +643,7 @@ updateSubmitState();
 updateUploadState();
 
 // ── 넓은 화면 양옆 패널: 입력 요약 / 과목 검색 ──────────────────────
-const stepNames = { "screen-start": "시작", "screen-upload": "① 사진 업로드", "screen-input": "② 정보 입력", "screen-loading": "추천 계산 중", "screen-result": "③ 추천 결과" };
+const stepNames = { "screen-start": "시작", "screen-upload": "① 사진 업로드", "screen-input": "② 정보 입력", "screen-loading": "추천 계산 중", "screen-result": "③ 추천 결과", "screen-write": "후기 남기기", "screen-reviews": "후기 열람" };
 
 function tagsHtml(list, bad) {
   if (!list.length) return '<span class="summary__empty">없음</span>';
@@ -816,19 +818,27 @@ rateList.addEventListener("click", async (e) => {
 
   submit.disabled = true;
   showRateMsg(item, "저장하는 중...");
-  const comment = item.querySelector(".rate-comment").value.trim();
+  const result = await saveReview(name, rating, item.querySelector(".rate-comment").value.trim());
+
+  if (!result.ok) {
+    submit.disabled = false;
+    showRateMsg(item, "저장에 실패했어요. 잠시 후 다시 시도해 주세요.", true);
+    return;
+  }
+  renderRateList();
+});
+
+// 별점 저장(공통): DB에 넣고, 성공하면 화면의 평균과 "이미 평가함" 기록을 갱신한다.
+async function saveReview(name, rating, comment) {
   const { error } = await supabaseClient
     .from("reviews")
     .insert({ subject_name: name, rating, comment: comment || null });
-
   if (error) {
-    submit.disabled = false;
-    showRateMsg(item, "저장에 실패했어요. 잠시 후 다시 시도해 주세요.", true);
     console.warn("별점 저장 실패:", error);
-    return;
+    return { ok: false, error };
   }
 
-  // 화면의 평균도 바로 갱신해 준다(다음 접속 때는 DB 값으로 다시 계산된다).
+  // 다음 접속 때는 DB 값으로 다시 계산되지만, 지금 화면에도 바로 반영한다.
   const prev = subjectRatings[name] || { avg: 0, count: 0 };
   const count = prev.count + 1;
   subjectRatings[name] = { avg: (prev.avg * prev.count + rating) / count, count };
@@ -836,9 +846,9 @@ rateList.addEventListener("click", async (e) => {
   const rated = getRated();
   rated.add(name);
   saveRated(rated);
-  renderRateList();
   renderSearch();
-});
+  return { ok: true };
+}
 
 openRateBtn.addEventListener("click", () => {
   renderRateList();
@@ -855,3 +865,175 @@ rateSheet.addEventListener("click", (e) => {
 subjectsReady.then(updateRateButton);
 updateRateButton();
 ratingsReady.then(renderSearch);
+
+// ── 첫 화면 3갈래 + 후기 남기기 / 후기 열람하기 ─────────────────
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+document.querySelectorAll("[data-go]").forEach((b) =>
+  b.addEventListener("click", () => showScreen(b.dataset.go))
+);
+
+// 후기 남기기: 과목 고르기 → 별점 + 후기 → 등록
+const writeSearch = document.getElementById("write-search");
+const writePick = document.getElementById("write-pick");
+const writeForm = document.getElementById("write-form");
+const writeMsg = document.getElementById("write-msg");
+const writeSubmit = document.getElementById("write-submit");
+const writeStars = document.getElementById("write-stars");
+let writeSelected = null;
+let writeRating = 0;
+
+function uniqueSubjectNames() {
+  return [...new Set(subjectData.map((s) => s.name))];
+}
+
+function renderWritePick() {
+  const q = normalizeName(writeSearch.value.trim());
+  const names = uniqueSubjectNames().filter((n) => !q || normalizeName(n).includes(q));
+  writePick.innerHTML = names.length
+    ? names
+        .map((n) => `<button type="button" class="pick-item${n === writeSelected ? " is-selected" : ""}" data-name="${escapeHtml(n)}">${escapeHtml(n)}</button>`)
+        .join("")
+    : '<span class="summary__empty">검색된 과목이 없어요</span>';
+}
+
+function setWriteStars(v) {
+  writeRating = v;
+  writeStars.querySelectorAll(".star").forEach((s) => s.classList.toggle("is-on", Number(s.dataset.v) <= v));
+}
+
+function selectWriteSubject(name) {
+  writeSelected = name;
+  const done = getRated().has(name);
+  const r = subjectRatings[name];
+  document.getElementById("write-name").textContent = name;
+  document.getElementById("write-avg").textContent = r ? `평균 ★${r.avg.toFixed(1)} (${r.count}명)` : "아직 후기가 없어요";
+  document.getElementById("write-comment").value = "";
+  document.getElementById("write-comment").disabled = done;
+  writeStars.querySelectorAll(".star").forEach((s) => (s.disabled = done));
+  setWriteStars(0);
+  writeSubmit.disabled = done;
+  writeMsg.textContent = done ? "이미 평가했어요 ✓" : "";
+  writeMsg.classList.remove("is-error");
+  writeForm.hidden = false;
+  renderWritePick();
+}
+
+function openWriteScreen() {
+  writeSelected = null;
+  writeForm.hidden = true;
+  writeSearch.value = "";
+  renderWritePick();
+  showScreen("write");
+}
+
+writePick.addEventListener("click", (e) => {
+  const b = e.target.closest(".pick-item");
+  if (b) selectWriteSubject(b.dataset.name);
+});
+writeSearch.addEventListener("input", renderWritePick);
+writeStars.addEventListener("click", (e) => {
+  const s = e.target.closest(".star");
+  if (s && !s.disabled) {
+    setWriteStars(Number(s.dataset.v));
+    writeMsg.textContent = "";
+  }
+});
+writeSubmit.addEventListener("click", async () => {
+  if (writeSubmit.disabled || !writeSelected) return;
+  if (!writeRating) {
+    writeMsg.textContent = "별점(★)을 먼저 골라주세요.";
+    writeMsg.classList.add("is-error");
+    return;
+  }
+  writeSubmit.disabled = true;
+  writeMsg.classList.remove("is-error");
+  writeMsg.textContent = "저장하는 중...";
+  const result = await saveReview(writeSelected, writeRating, document.getElementById("write-comment").value.trim());
+  if (!result.ok) {
+    writeSubmit.disabled = false;
+    writeMsg.textContent = "저장에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    writeMsg.classList.add("is-error");
+    return;
+  }
+  reviewsLoaded = false; // 열람 화면은 다음에 열 때 새로 불러온다
+  selectWriteSubject(writeSelected);
+  writeMsg.textContent = "등록됐어요. 고마워요! ✓";
+});
+
+// 후기 열람하기: 최신순 목록 + 과목명/영역 필터
+const reviewsSearch = document.getElementById("reviews-search");
+const reviewsArea = document.getElementById("reviews-area");
+const reviewsList = document.getElementById("reviews-list");
+const reviewsSummary = document.getElementById("reviews-summary");
+let reviewsData = [];
+let reviewsLoaded = false;
+
+async function loadReviews() {
+  reviewsSummary.textContent = "후기를 불러오는 중...";
+  reviewsList.innerHTML = "";
+  const { data, error } = await supabaseClient
+    .from("reviews")
+    .select("subject_name,rating,comment,created_at")
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (error) {
+    console.warn("후기 불러오기 실패:", error);
+    reviewsData = [];
+    reviewsSummary.textContent = "후기를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+    return;
+  }
+  // 수강신청표에 실제로 있는 과목의 후기만 보여준다.
+  const valid = new Set(subjectData.map((s) => s.name));
+  reviewsData = data.filter((r) => valid.has(r.subject_name));
+  reviewsLoaded = true;
+  renderReviews();
+}
+
+function renderReviews() {
+  if (reviewsArea.options.length === 1) AREA_ORDER.forEach((a) => reviewsArea.add(new Option(a, a)));
+  const q = normalizeName(reviewsSearch.value.trim());
+  const area = reviewsArea.value;
+  const areaOf = {};
+  subjectData.forEach((s) => (areaOf[s.name] = areaOf[s.name] || s.area));
+
+  const rows = reviewsData.filter(
+    (r) => (!q || normalizeName(r.subject_name).includes(q)) && (!area || areaOf[r.subject_name] === area)
+  );
+
+  const names = new Set(rows.map((r) => r.subject_name));
+  if (!rows.length) {
+    reviewsSummary.textContent = "";
+  } else if (names.size === 1) {
+    const avg = rows.reduce((sum, r) => sum + r.rating, 0) / rows.length;
+    reviewsSummary.innerHTML = `<b>★${avg.toFixed(1)}</b> · 후기 ${rows.length}개`;
+  } else {
+    reviewsSummary.textContent = `후기 ${rows.length}개 · 과목 ${names.size}개`;
+  }
+
+  reviewsList.innerHTML = rows.length
+    ? rows
+        .map((r) => {
+          const date = new Date(r.created_at).toLocaleDateString("ko-KR");
+          const comment = r.comment ? `<p class="review-card__comment">${escapeHtml(r.comment)}</p>` : "";
+          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}</span>
+            <span class="review-card__stars">${"★".repeat(r.rating)}<span style="color:#d8d2df">${"★".repeat(5 - r.rating)}</span></span></div>${comment}
+            <div class="review-card__date">${date}</div></div>`;
+        })
+        .join("")
+    : '<p class="reviews-empty">조건에 맞는 후기가 아직 없어요.</p>';
+}
+
+reviewsSearch.addEventListener("input", renderReviews);
+reviewsArea.addEventListener("change", renderReviews);
+
+function openReviewsScreen() {
+  showScreen("reviews");
+  if (!reviewsLoaded) loadReviews();
+  else renderReviews();
+}
+
+document.getElementById("btn-go-write").addEventListener("click", () => subjectsReady.then(openWriteScreen));
+document.getElementById("btn-go-read").addEventListener("click", () => subjectsReady.then(openReviewsScreen));
