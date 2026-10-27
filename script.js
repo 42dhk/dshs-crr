@@ -73,6 +73,45 @@ async function loadSubjectsFromDb() {
 }
 const subjectsReady = loadSubjectsFromDb();
 
+// 과목별 평균 별점: 과목명 -> { avg, count }. 불러오지 못하면 비어 있고, 추천에는 영향을 주지 않는다.
+let subjectRatings = {};
+
+async function loadRatings() {
+  try {
+    let rows;
+    const view = await supabaseClient.from("subject_ratings").select("*");
+    if (!view.error && view.data) {
+      rows = view.data.map((r) => ({ name: r.subject_name, avg: Number(r.avg_rating), count: Number(r.review_count) }));
+    } else {
+      // 평균 뷰(supabase/ratings.sql)를 아직 안 만들었다면 reviews 테이블을 직접 읽어서 계산한다.
+      const raw = await supabaseClient.from("reviews").select("subject_name,rating").limit(5000);
+      if (raw.error) throw raw.error;
+      const agg = {};
+      raw.data.forEach((x) => {
+        (agg[x.subject_name] ||= { sum: 0, count: 0 });
+        agg[x.subject_name].sum += x.rating;
+        agg[x.subject_name].count += 1;
+      });
+      rows = Object.entries(agg).map(([name, a]) => ({ name, avg: a.sum / a.count, count: a.count }));
+    }
+    subjectRatings = Object.fromEntries(rows.map((r) => [r.name, { avg: r.avg, count: r.count }]));
+  } catch (e) {
+    console.warn("별점을 불러오지 못했어요(추천은 별점 없이 계산합니다):", e);
+  }
+}
+const ratingsReady = loadRatings();
+
+// 별점 → 추천 가산점. 후기가 적으면 중립(3점)에 가깝게 끌어당겨서(가상의 3점 후기 3개를 섞는 방식)
+// 후기 1~2개로 추천이 크게 흔들리지 않게 하고, 별점이 없으면 0(중립)이다.
+const RATING_PRIOR = 3;
+const RATING_PRIOR_WEIGHT = 3;
+function ratingBonus(name) {
+  const r = subjectRatings[name];
+  if (!r || !r.count) return 0;
+  const adjusted = (r.avg * r.count + RATING_PRIOR * RATING_PRIOR_WEIGHT) / (r.count + RATING_PRIOR_WEIGHT);
+  return adjusted - RATING_PRIOR;
+}
+
 // 졸업 최소이수학점 기준에 등장하는 4개 전공 영역. buildPlan이 이 영역들을
 // "담을 수 있었는데 0학점으로 비워뒀는지" 판정하는 데 사용한다.
 const MAJOR_AREAS = ["과학", "정보과학", "수학", "AI융합"];
@@ -99,7 +138,8 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
       hours: s.credit + (s.ap ? 1 : 0),
       disliked,
       alreadyTaken,
-      score: interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred && s.ap ? 1 : 0),
+      score:
+        interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred && s.ap ? 1 : 0) + ratingBonus(s.name),
     };
   });
 
@@ -266,7 +306,11 @@ function renderPlan(plan, label) {
     .filter((area) => byArea[area])
     .map((area) => {
       const subjectsHtml = byArea[area]
-        .map((s) => `<span class="plan-subject${s.ap ? " is-ap" : ""}">${s.name}(${s.credit})${s.ap ? '<span class="ap-tag">AP</span>' : ""}</span>`)
+        .map((s) => {
+          const r = subjectRatings[s.name];
+          const star = r ? `<span class="star-tag" title="후기 ${r.count}개">★${r.avg.toFixed(1)}</span>` : "";
+          return `<span class="plan-subject${s.ap ? " is-ap" : ""}">${s.name}(${s.credit})${s.ap ? '<span class="ap-tag">AP</span>' : ""}${star}</span>`;
+        })
         .join("");
       return `<div class="plan-area"><div class="plan-area__name">${area}</div><div class="plan-subject-list">${subjectsHtml}</div></div>`;
     })
@@ -275,6 +319,12 @@ function renderPlan(plan, label) {
   const violationHtml = plan.violations.length
     ? `<div class="grad-warn">⚠ ${plan.violations.join(", ")} 학점을 이번 학기에 하나도 못 담았어요 (선택 가능한 과목이 전부 비선호이거나 선이수 조건 때문일 수 있어요).</div>`
     : "";
+
+  // 안 전체 평균 별점: 별점이 있는 과목들의 평균만 계산한다(없으면 "-").
+  const rated = plan.subjects.filter((s) => subjectRatings[s.name]);
+  const avgRating = rated.length
+    ? (rated.reduce((sum, s) => sum + subjectRatings[s.name].avg, 0) / rated.length).toFixed(1)
+    : "-";
 
   return `
     <div class="plan-card">
@@ -286,6 +336,7 @@ function renderPlan(plan, label) {
         <div class="plan-stat"><strong>${plan.totalCredits}</strong><span>이수학점</span></div>
         <div class="plan-stat"><strong>${plan.totalHours}</strong><span>주당 시수</span></div>
         <div class="plan-stat"><strong>${plan.freeHours}</strong><span>공강 시수</span></div>
+        <div class="plan-stat"><strong>${avgRating === "-" ? "-" : "★" + avgRating}</strong><span>평균 별점</span></div>
       </div>
       ${violationHtml}
       ${areaHtml}
@@ -553,7 +604,7 @@ submitBtn.addEventListener("click", () => {
   );
 
   // 실제 계산은 짧게 지연시켜 로딩 화면이 보이도록 한다.
-  Promise.all([subjectsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
+  Promise.all([subjectsReady, ratingsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
     // 여러 안을 만들어보고 졸업 기준(담을 수 있었는데 0학점인 영역)을 어기는 안은 버린 뒤,
     // 기준을 통과한 안 중에서 최종 2개를 고른다.
     const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled);
@@ -648,7 +699,7 @@ function renderSearch() {
     .slice(0, 40)
     .map(
       (s) => `<div class="search-item"><div class="search-item__name">${s.name}${s.ap ? ' <span class="search-item__ap">AP</span>' : ""}</div>
-        <div class="search-item__meta">${s.area} · ${s.credit}학점${s.ap ? ` (시수 ${s.credit + 1})` : ""} · 개설 ${s.terms.join(", ")}${s.requires ? `<br>선이수: ${s.requires}` : ""}${s.group ? "<br>택일 과목" : ""}${s.mandatory ? "<br>필수 과목" : ""}</div></div>`
+        <div class="search-item__meta">${s.area} · ${s.credit}학점${s.ap ? ` (시수 ${s.credit + 1})` : ""} · 개설 ${s.terms.join(", ")}${subjectRatings[s.name] ? ` · <span class="star-tag">★${subjectRatings[s.name].avg.toFixed(1)} (${subjectRatings[s.name].count})</span>` : ""}${s.requires ? `<br>선이수: ${s.requires}` : ""}${s.group ? "<br>택일 과목" : ""}${s.mandatory ? "<br>필수 과목" : ""}</div></div>`
     )
     .join("");
 }
@@ -670,3 +721,137 @@ searchInput.addEventListener("input", renderSearch);
 searchArea.addEventListener("change", renderSearch);
 subjectsReady.then(initSidePanels);
 initSidePanels();
+
+// ── 별점 남기기 ────────────────────────────────────────────────
+const rateSheet = document.getElementById("rate-sheet");
+const rateList = document.getElementById("rate-list");
+const openRateBtn = document.getElementById("btn-open-rate");
+const RATED_KEY = "dshs_rated";
+
+// 같은 브라우저에서 같은 과목을 여러 번 평가하는 걸 막는 간단한 장치(로그인이 없어서 완벽하진 않다).
+function getRated() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(RATED_KEY) || "[]"));
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveRated(set) {
+  try {
+    localStorage.setItem(RATED_KEY, JSON.stringify([...set]));
+  } catch (e) {
+    /* 저장이 막힌 브라우저에서는 이번 접속 동안만 막지 못한다 */
+  }
+}
+
+// 평가할 수 있는 과목 = 현재 학기보다 이전 학기에 "들은 과목"으로 표시한 과목(이름 기준, 중복 제거)
+function ratableNames() {
+  const { grade, term } = selectedGradeTerm();
+  const selIdx = termIndex(grade, term);
+  const names = [];
+  subjectData.forEach((s) => {
+    if (termIndex(s.grade, s.term) < selIdx && takenNames.has(s.name) && !names.includes(s.name)) names.push(s.name);
+  });
+  return names;
+}
+
+function updateRateButton() {
+  const n = ratableNames().length;
+  openRateBtn.hidden = n === 0;
+  openRateBtn.textContent = `★ 들은 과목 평가하기 (${n}개)`;
+}
+
+function renderRateList() {
+  const rated = getRated();
+  const names = ratableNames();
+  rateList.innerHTML = names.length
+    ? names
+        .map((name) => {
+          const done = rated.has(name);
+          const r = subjectRatings[name];
+          const avg = r ? `<span class="rate-item__avg">평균 ★${r.avg.toFixed(1)} (${r.count}명)</span>` : "";
+          return `<div class="rate-item${done ? " is-done" : ""}" data-name="${name}" data-value="0">
+            <div class="rate-item__name">${name}${avg}</div>
+            <div class="rate-stars">${[1, 2, 3, 4, 5].map((v) => `<button type="button" class="star" data-v="${v}" aria-label="${v}점" ${done ? "disabled" : ""}>★</button>`).join("")}</div>
+            <textarea class="rate-comment" maxlength="500" placeholder="한 줄 후기 (선택)" ${done ? "disabled" : ""}></textarea>
+            <div class="rate-actions"><span class="rate-msg">${done ? "이미 평가했어요 ✓" : ""}</span>
+              <button type="button" class="rate-submit" ${done ? "disabled" : ""}>등록</button></div>
+          </div>`;
+        })
+        .join("")
+    : '<p class="field-note">수강신청표에서 들은 과목을 먼저 클릭해 주세요.</p>';
+}
+
+function setStars(item, value) {
+  item.dataset.value = String(value);
+  item.querySelectorAll(".star").forEach((s) => s.classList.toggle("is-on", Number(s.dataset.v) <= value));
+}
+
+function showRateMsg(item, text, isError) {
+  const msg = item.querySelector(".rate-msg");
+  msg.textContent = text;
+  msg.classList.toggle("is-error", !!isError);
+}
+
+rateList.addEventListener("click", async (e) => {
+  const item = e.target.closest(".rate-item");
+  if (!item) return;
+
+  const star = e.target.closest(".star");
+  if (star && !star.disabled) {
+    setStars(item, Number(star.dataset.v));
+    showRateMsg(item, "");
+    return;
+  }
+
+  const submit = e.target.closest(".rate-submit");
+  if (!submit || submit.disabled) return;
+
+  const rating = Number(item.dataset.value);
+  const name = item.dataset.name;
+  if (!rating) {
+    showRateMsg(item, "별점(★)을 먼저 골라주세요.", true);
+    return;
+  }
+
+  submit.disabled = true;
+  showRateMsg(item, "저장하는 중...");
+  const comment = item.querySelector(".rate-comment").value.trim();
+  const { error } = await supabaseClient
+    .from("reviews")
+    .insert({ subject_name: name, rating, comment: comment || null });
+
+  if (error) {
+    submit.disabled = false;
+    showRateMsg(item, "저장에 실패했어요. 잠시 후 다시 시도해 주세요.", true);
+    console.warn("별점 저장 실패:", error);
+    return;
+  }
+
+  // 화면의 평균도 바로 갱신해 준다(다음 접속 때는 DB 값으로 다시 계산된다).
+  const prev = subjectRatings[name] || { avg: 0, count: 0 };
+  const count = prev.count + 1;
+  subjectRatings[name] = { avg: (prev.avg * prev.count + rating) / count, count };
+
+  const rated = getRated();
+  rated.add(name);
+  saveRated(rated);
+  renderRateList();
+  renderSearch();
+});
+
+openRateBtn.addEventListener("click", () => {
+  renderRateList();
+  rateSheet.hidden = false;
+});
+document.getElementById("rate-close").addEventListener("click", () => {
+  rateSheet.hidden = true;
+});
+rateSheet.addEventListener("click", (e) => {
+  if (e.target === rateSheet) rateSheet.hidden = true; // 바깥(어두운 부분)을 누르면 닫기
+});
+
+["click", "change", "contextmenu"].forEach((ev) => document.addEventListener(ev, () => setTimeout(updateRateButton, 0)));
+subjectsReady.then(updateRateButton);
+updateRateButton();
+ratingsReady.then(renderSearch);

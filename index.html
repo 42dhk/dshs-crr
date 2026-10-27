@@ -173,6 +173,7 @@
           <b>이전 학기</b> 과목은 <b>클릭</b>해서 들은 과목으로 표시하세요. 추천에서 빠지고, Ⅱ과목·실험과목의 선이수 조건도 채워져요.
           <b>이번 학기</b> 과목은 폐강된 것을 <b>우클릭</b>(모바일은 길게 누르기)하면 추천에서 빠져요.
         </p>
+        <button type="button" id="btn-open-rate" class="btn-rate" hidden>★ 들은 과목 평가하기</button>
         <div id="catalog" class="catalog"></div>
       </div>
 
@@ -241,6 +242,18 @@
       </div>
     </div>
   </section>
+
+  <!-- 들은 과목 별점 남기기 (아래에서 올라오는 창) -->
+  <div id="rate-sheet" class="sheet" hidden>
+    <div class="sheet__panel" role="dialog" aria-label="들은 과목 평가하기">
+      <div class="sheet__head">
+        <span class="sheet__title">들은 과목 평가하기</span>
+        <button type="button" id="rate-close" class="link-btn">닫기</button>
+      </div>
+      <p class="field-note">익명으로 저장돼요. 과목마다 한 번만 남길 수 있고, 다른 학생들의 추천에 반영돼요.</p>
+      <div id="rate-list" class="rate-list"></div>
+    </div>
+  </div>
 
 </div>
 

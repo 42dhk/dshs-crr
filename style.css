@@ -1097,3 +1097,168 @@ body {
   padding: 8px 10px;
   border-radius: 8px;
 }
+
+/* 별점 시스템 */
+[hidden] {
+  display: none !important;
+}
+
+.star-tag {
+  margin-left: 4px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #d98a00;
+}
+
+.btn-rate {
+  width: 100%;
+  margin-bottom: 12px;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #b57300;
+  background: #fff4d6;
+  border: 1.5px solid #f3d58a;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.btn-rate:hover {
+  background: #ffedb8;
+}
+
+.sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(30, 26, 40, 0.45);
+}
+
+.sheet__panel {
+  width: 100%;
+  max-height: 82%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  background: var(--surface);
+  border-radius: 22px 22px 0 0;
+  padding: 18px 18px 24px;
+}
+
+.sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.sheet__title {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.rate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.rate-item {
+  background: var(--bg-1);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.rate-item.is-done {
+  opacity: 0.6;
+}
+
+.rate-item__name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.rate-item__avg {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  margin-left: 6px;
+}
+
+.rate-stars {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.star {
+  border: none;
+  background: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #d8d2df;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.star.is-on {
+  color: #f5a623;
+}
+
+.rate-comment {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  resize: none;
+  height: 54px;
+}
+
+.rate-comment:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.rate-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  gap: 8px;
+}
+
+.rate-msg {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.rate-msg.is-error {
+  color: var(--danger);
+}
+
+.rate-submit {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #fff;
+  background: linear-gradient(135deg, #ff9a6b, var(--primary-dark));
+  border: none;
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+
+.rate-submit:disabled {
+  background: var(--border);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
