@@ -83,12 +83,17 @@ const MAJOR_AREAS = ["과학", "정보과학", "수학", "AI융합"];
 // balanceMode: true면 졸업 기준에 들어가는 4개 영역(과학/정보과학/수학/AI융합) 중
 //   이번 학기에 들을 수 있는 과목이 하나라도 있는 영역은 먼저 1개씩 담아 놓고 나머지를 채운다.
 //   이렇게 만든 안이 졸업 기준과 어긋나면(담을 수 있었는데 안 담았으면) 그 안은 폐기 대상이 된다.
-function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, hourCap, balanceMode) {
-  const pool = subjectData.filter((s) => s.grade === grade && s.term === term);
+function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, hourCap, balanceMode) {
+  // 이미 들은 과목(이름 기준이라 다른 학기에 같은 과목이 열려도 함께 제외)과
+  // 이번 학기에 폐강된 과목은 필수·택N·자유선택 구분 없이 후보에서 아예 뺀다.
+  // 단, 들은 과목은 아래 isEligible에서 선이수 조건을 충족한 것으로 계속 인정한다.
+  const pool = subjectData.filter(
+    (s) => s.grade === grade && s.term === term && !completed.has(s.name) && !cancelled.has(s.name)
+  );
 
   const scored = pool.map((s) => {
     const disliked = isSimilarToDislike(s.name, dislikeTerms);
-    const alreadyTaken = completed.has(s.name);
+    const alreadyTaken = false;
     return {
       ...s,
       hours: s.credit + (s.ap ? 1 : 0),
@@ -186,7 +191,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
 
 // 여러 후보 시간표를 만들어 졸업 기준 위반이 없는 안만 골라낸다.
 // 위반이 있는 안은 폐기하고, 남는 자리가 부족하면 균형 모드로 다시 만든 안으로 채운다.
-function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed) {
+function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled) {
   const attempts = [
     { label: "균형 잡힌 시간표", hourCap: 27, balanceMode: true },
     { label: "관심 집중형 시간표", hourCap: 27, balanceMode: false },
@@ -196,7 +201,7 @@ function generatePlans(grade, term, interests, dislikeTerms, apPreferred, comple
 
   const candidates = attempts.map((a) => ({
     ...a,
-    plan: buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, a.hourCap, a.balanceMode),
+    plan: buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, a.hourCap, a.balanceMode),
   }));
 
   const seen = new Set();
@@ -433,7 +438,98 @@ dislikeInput.addEventListener("keydown", (e) => {
   }
 });
 
-// 화면3 -> 화면4(로딩) -> 실제 추천 계산 -> 화면5(결과)
+// 화면3: 수강신청표 — 이전 학기 과목은 클릭(들은 과목), 이번 학기 과목은 우클릭(폐강)
+const catalogEl = document.getElementById("catalog");
+const takenNames = new Set(); // 들은 과목: 이름 기준(다른 학기에 같은 과목이 열려도 함께 적용)
+const cancelledKeys = new Set(); // 폐강: "학년-학기|과목명" 기준(폐강은 그 학기에만 해당)
+
+function selectedGradeTerm() {
+  return {
+    grade: document.getElementById("select-grade").value === "2학년" ? 2 : 3,
+    term: document.getElementById("select-term").value === "1학기" ? 1 : 2,
+  };
+}
+const termIndex = (grade, term) => (grade - 2) * 2 + term;
+const cancelKey = (grade, term, name) => `${grade}-${term}|${name}`;
+
+function renderCatalog() {
+  const { grade: selGrade, term: selTerm } = selectedGradeTerm();
+  const selIdx = termIndex(selGrade, selTerm);
+  const areaOrder = ["과학", "정보과학", "수학", "AI융합", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
+  let html = "";
+
+  for (const [g, t] of [[2, 1], [2, 2], [3, 1], [3, 2]]) {
+    const idx = termIndex(g, t);
+    if (idx > selIdx) continue;
+    const isCurrent = idx === selIdx;
+    const inTerm = subjectData.filter((s) => s.grade === g && s.term === t);
+    const chips = areaOrder
+      .map((area) => {
+        const items = inTerm.filter((s) => s.area === area);
+        if (!items.length) return "";
+        const chipHtml = items
+          .map((s) => {
+            const taken = !isCurrent && takenNames.has(s.name);
+            const cancelled = isCurrent && cancelledKeys.has(cancelKey(g, t, s.name));
+            const cls = `cat-chip${taken ? " is-taken" : ""}${cancelled ? " is-cancelled" : ""}`;
+            return `<button type="button" class="${cls}" data-grade="${g}" data-term="${t}" data-name="${s.name}" data-current="${isCurrent}">${s.name}(${s.credit})${s.ap ? "*" : ""}</button>`;
+          })
+          .join("");
+        return `<div class="cat-area"><span class="cat-area__name">${area}</span><div class="cat-chips">${chipHtml}</div></div>`;
+      })
+      .join("");
+    const label = isCurrent ? `${g}학년 ${t}학기 · 이번 학기 (폐강 과목은 우클릭)` : `${g}학년 ${t}학기 · 들은 과목은 클릭`;
+    html += `<div class="cat-term${isCurrent ? " is-current" : ""}"><div class="cat-term__title">${label}</div>${chips}</div>`;
+  }
+  catalogEl.innerHTML = html;
+}
+
+function toggleCancelled(chip) {
+  const { grade, term, name } = chip.dataset;
+  const key = cancelKey(grade, term, name);
+  if (cancelledKeys.has(key)) cancelledKeys.delete(key);
+  else cancelledKeys.add(key);
+  chip.classList.toggle("is-cancelled");
+}
+
+catalogEl.addEventListener("click", (e) => {
+  const chip = e.target.closest(".cat-chip");
+  if (!chip || chip.dataset.current === "true") return;
+  if (takenNames.has(chip.dataset.name)) takenNames.delete(chip.dataset.name);
+  else takenNames.add(chip.dataset.name);
+  renderCatalog(); // 같은 이름의 과목이 다른 학기 칸에도 있으면 함께 표시를 바꾼다
+});
+
+catalogEl.addEventListener("contextmenu", (e) => {
+  const chip = e.target.closest(".cat-chip");
+  if (!chip || chip.dataset.current !== "true") return;
+  e.preventDefault();
+  toggleCancelled(chip);
+});
+
+// 모바일은 우클릭이 없으므로 길게 누르면 폐강 표시 (contextmenu와 중복되지 않도록 시간 간격으로 막는다)
+let pressTimer = null;
+let lastToggleAt = 0;
+catalogEl.addEventListener("touchstart", (e) => {
+  const chip = e.target.closest(".cat-chip");
+  if (!chip || chip.dataset.current !== "true") return;
+  pressTimer = setTimeout(() => {
+    if (Date.now() - lastToggleAt > 800) {
+      lastToggleAt = Date.now();
+      toggleCancelled(chip);
+    }
+  }, 500);
+}, { passive: true });
+["touchend", "touchmove", "touchcancel"].forEach((ev) =>
+  catalogEl.addEventListener(ev, () => clearTimeout(pressTimer), { passive: true })
+);
+
+document.getElementById("select-grade").addEventListener("change", renderCatalog);
+document.getElementById("select-term").addEventListener("change", renderCatalog);
+subjectsReady.then(renderCatalog);
+renderCatalog();
+
+// 화면4 -> 화면5(로딩) -> 실제 추천 계산 -> 결과
 const resultContent = document.getElementById("result-content");
 const resultPlaceholderHtml = resultContent.innerHTML;
 
@@ -441,20 +537,26 @@ submitBtn.addEventListener("click", () => {
   if (submitBtn.disabled) return;
   showScreen("loading");
 
-  const grade = document.getElementById("select-grade").value === "2학년" ? 2 : 3;
-  const term = document.getElementById("select-term").value === "1학기" ? 1 : 2;
+  const { grade, term } = selectedGradeTerm();
   const interests = Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag);
   const dislikeTerms = Array.from(dislikes);
   const apPreferred = apToggle.classList.contains("on");
-  const completed = new Set(
-    Array.from(document.querySelectorAll('input[name="prereq"]:checked')).map((c) => c.value)
+
+  // 들은 과목은 "이전 학기 칸에 보이는 과목"만 인정한다(학기를 바꿔서 안 보이는 체크는 무시).
+  const selIdx = termIndex(grade, term);
+  const priorNames = new Set(
+    subjectData.filter((s) => termIndex(s.grade, s.term) < selIdx).map((s) => s.name)
+  );
+  const completed = new Set([...takenNames].filter((n) => priorNames.has(n)));
+  const cancelled = new Set(
+    [...cancelledKeys].filter((k) => k.startsWith(`${grade}-${term}|`)).map((k) => k.split("|")[1])
   );
 
   // 실제 계산은 짧게 지연시켜 로딩 화면이 보이도록 한다.
   Promise.all([subjectsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
     // 여러 안을 만들어보고 졸업 기준(담을 수 있었는데 0학점인 영역)을 어기는 안은 버린 뒤,
     // 기준을 통과한 안 중에서 최종 2개를 고른다.
-    const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed);
+    const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled);
 
     resultContent.innerHTML =
       renderGraduationRef() +
@@ -473,7 +575,9 @@ document.getElementById("btn-restart").addEventListener("click", () => {
   apToggle.setAttribute("aria-checked", "false");
   dislikes.clear();
   dislikeList.innerHTML = "";
-  document.querySelectorAll('input[name="prereq"]:checked').forEach((c) => { c.checked = false; });
+  takenNames.clear();
+  cancelledKeys.clear();
+  renderCatalog();
   photos.length = 0;
   renderPhotoGrid();
   updateUploadState();

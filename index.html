@@ -134,13 +134,12 @@
       </div>
 
       <div class="field-group">
-        <label class="field-label">이전 학기에 들은 과목 <span class="field-hint">해당하면 체크</span></label>
-        <p class="field-note">Ⅱ과목·실험과목을 추천받으려면 관련 기초 과목을 미리 들었는지 알아야 해요.</p>
-        <div class="check-row">
-          <label class="check-pill"><input type="checkbox" name="prereq" value="일반물리학Ⅰ"> 일반물리학Ⅰ</label>
-          <label class="check-pill"><input type="checkbox" name="prereq" value="일반화학Ⅰ"> 일반화학Ⅰ</label>
-          <label class="check-pill"><input type="checkbox" name="prereq" value="미적분학Ⅰ"> 미적분학Ⅰ</label>
-        </div>
+        <label class="field-label">수강신청표 <span class="field-hint">들은 과목 · 폐강 과목 표시</span></label>
+        <p class="field-note">
+          <b>이전 학기</b> 과목은 <b>클릭</b>해서 들은 과목으로 표시하세요. 추천에서 빠지고, Ⅱ과목·실험과목의 선이수 조건도 채워져요.
+          <b>이번 학기</b> 과목은 폐강된 것을 <b>우클릭</b>(모바일은 길게 누르기)하면 추천에서 빠져요.
+        </p>
+        <div id="catalog" class="catalog"></div>
       </div>
 
       <div class="field-group">

@@ -451,35 +451,89 @@ body {
   line-height: 1.4;
 }
 
-.check-row {
+/* 수강신청표(들은 과목 / 폐강 표시) */
+.catalog {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.check-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--ink);
+.cat-term {
   background: var(--bg-1);
   border: 1.5px solid var(--border);
-  border-radius: 999px;
-  padding: 7px 14px;
-  cursor: pointer;
+  border-radius: 14px;
+  padding: 12px;
 }
 
-.check-pill input {
-  accent-color: var(--primary);
-  cursor: pointer;
+.cat-term.is-current {
+  background: #fff7f1;
+  border-color: #f6cdb4;
 }
 
-.check-pill:has(input:checked) {
+.cat-term__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.cat-area {
+  margin-bottom: 8px;
+}
+
+.cat-area:last-child {
+  margin-bottom: 0;
+}
+
+.cat-area__name {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.cat-chip {
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 9px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.cat-chip:hover {
+  border-color: var(--primary);
+}
+
+.cat-chip.is-taken {
   background: var(--primary-light);
   border-color: var(--primary);
   color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.cat-chip.is-taken::before {
+  content: "✓ ";
+}
+
+.cat-chip.is-cancelled {
+  background: var(--danger-light);
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
 }
 
 .select-row {
