@@ -46,6 +46,33 @@ function interestScore(subjectItem, interests) {
   return score;
 }
 
+// 과목 데이터: 기본은 subjects.js(대비용). Supabase에서 불러오기에 성공하면 DB 데이터로 교체한다.
+let subjectData = SUBJECTS;
+let subjectSource = "로컬(subjects.js)";
+
+async function loadSubjectsFromDb() {
+  try {
+    const { data, error } = await supabaseClient.from("subjects").select("*").order("id");
+    if (error || !data || data.length === 0) throw error || new Error("빈 결과");
+    subjectData = data.map((r) => ({
+      id: `db${r.id}`,
+      name: r.name,
+      credit: r.credit,
+      ap: r.ap,
+      area: r.area,
+      grade: r.grade,
+      term: r.term,
+      group: r.grp,
+      mandatory: r.mandatory,
+      requires: r.requires,
+    }));
+    subjectSource = "Supabase DB";
+  } catch (e) {
+    console.warn("DB에서 과목을 불러오지 못해 로컬 데이터를 사용합니다:", e);
+  }
+}
+const subjectsReady = loadSubjectsFromDb();
+
 // 졸업 최소이수학점 기준에 등장하는 4개 전공 영역. buildPlan이 이 영역들을
 // "담을 수 있었는데 0학점으로 비워뒀는지" 판정하는 데 사용한다.
 const MAJOR_AREAS = ["과학", "정보과학", "수학", "AI융합"];
@@ -57,7 +84,7 @@ const MAJOR_AREAS = ["과학", "정보과학", "수학", "AI융합"];
 //   이번 학기에 들을 수 있는 과목이 하나라도 있는 영역은 먼저 1개씩 담아 놓고 나머지를 채운다.
 //   이렇게 만든 안이 졸업 기준과 어긋나면(담을 수 있었는데 안 담았으면) 그 안은 폐기 대상이 된다.
 function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, hourCap, balanceMode) {
-  const pool = SUBJECTS.filter((s) => s.grade === grade && s.term === term);
+  const pool = subjectData.filter((s) => s.grade === grade && s.term === term);
 
   const scored = pool.map((s) => {
     const disliked = isSimilarToDislike(s.name, dislikeTerms);
@@ -424,7 +451,7 @@ submitBtn.addEventListener("click", () => {
   );
 
   // 실제 계산은 짧게 지연시켜 로딩 화면이 보이도록 한다.
-  setTimeout(() => {
+  Promise.all([subjectsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
     // 여러 안을 만들어보고 졸업 기준(담을 수 있었는데 0학점인 영역)을 어기는 안은 버린 뒤,
     // 기준을 통과한 안 중에서 최종 2개를 고른다.
     const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed);
@@ -434,7 +461,7 @@ submitBtn.addEventListener("click", () => {
       plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`)).join("");
 
     showScreen("result");
-  }, 900);
+  });
 });
 
 // 화면5 -> 화면1 (처음으로, 입력값 초기화)

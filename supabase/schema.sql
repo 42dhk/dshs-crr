@@ -1,0 +1,133 @@
+-- DSHS CRR Supabase 스키마. Supabase 대시보드 > SQL Editor에 통째로 붙여넣어 실행하세요.
+
+create table public.subjects (
+  id bigint generated always as identity primary key,
+  name text not null,
+  credit int not null,
+  ap boolean not null default false,
+  area text not null,
+  grade int not null,
+  term int not null,
+  grp text,
+  mandatory boolean not null default false,
+  requires text
+);
+
+create table public.reviews (
+  id bigint generated always as identity primary key,
+  subject_name text not null,
+  rating int not null check (rating between 1 and 5),
+  comment text check (char_length(comment) <= 500),
+  created_at timestamptz not null default now()
+);
+
+-- RLS 켜기 (켜기만 하고 정책이 없으면 아무도 접근 못 함)
+alter table public.subjects enable row level security;
+alter table public.reviews enable row level security;
+
+-- subjects: 누구나 읽기만 가능, 쓰기는 대시보드에서만
+grant select on public.subjects to anon;
+create policy "subjects read" on public.subjects for select to anon using (true);
+
+-- reviews: 누구나 읽기 + 작성 가능(수정/삭제는 불가)
+grant select, insert on public.reviews to anon;
+create policy "reviews read" on public.reviews for select to anon using (true);
+create policy "reviews insert" on public.reviews for insert to anon with check (rating between 1 and 5);
+
+insert into public.subjects (name, credit, ap, area, grade, term, grp, mandatory, requires) values
+  ('일반물리학Ⅰ', 3, false, '과학', 2, 1, null, false, null),
+  ('일반물리학실험Ⅰ', 1, false, '과학', 2, 1, null, false, '일반물리학Ⅰ'),
+  ('일반화학Ⅰ', 3, false, '과학', 2, 1, null, false, null),
+  ('일반화학실험Ⅰ', 1, true, '과학', 2, 1, null, false, '일반화학Ⅰ'),
+  ('일반생물학', 3, false, '과학', 2, 1, null, false, null),
+  ('일반지구과학', 3, false, '과학', 2, 1, null, false, null),
+  ('일반물리학Ⅰ', 3, false, '과학', 2, 2, null, false, null),
+  ('일반물리학실험Ⅰ', 1, false, '과학', 2, 2, null, false, '일반물리학Ⅰ'),
+  ('일반화학Ⅰ', 3, false, '과학', 2, 2, null, false, null),
+  ('일반화학실험Ⅰ', 1, true, '과학', 2, 2, null, false, '일반화학Ⅰ'),
+  ('일반생물학', 3, false, '과학', 2, 2, null, false, null),
+  ('일반생물학실험', 1, false, '과학', 2, 2, null, false, null),
+  ('일반지구과학', 3, false, '과학', 2, 2, null, false, null),
+  ('일반지구과학실험', 1, false, '과학', 2, 2, null, false, null),
+  ('일반물리학Ⅱ', 3, false, '과학', 2, 2, null, false, '일반물리학Ⅰ'),
+  ('일반물리학실험Ⅱ', 1, false, '과학', 2, 2, null, false, '일반물리학Ⅱ'),
+  ('일반화학Ⅱ', 3, false, '과학', 2, 2, null, false, '일반화학Ⅰ'),
+  ('일반화학실험Ⅱ', 1, false, '과학', 2, 2, null, false, '일반화학Ⅱ'),
+  ('일반물리학Ⅱ', 3, false, '과학', 3, 1, null, false, '일반물리학Ⅰ'),
+  ('일반물리학실험Ⅱ', 1, false, '과학', 3, 1, null, false, '일반물리학Ⅱ'),
+  ('일반화학Ⅱ', 3, false, '과학', 3, 1, null, false, '일반화학Ⅰ'),
+  ('일반화학실험Ⅱ', 1, true, '과학', 3, 1, null, false, '일반화학Ⅱ'),
+  ('심화생명과학', 3, false, '과학', 3, 1, null, false, null),
+  ('심화생명과학실험', 1, false, '과학', 3, 1, null, false, null),
+  ('심화지구과학', 3, false, '과학', 3, 1, null, false, null),
+  ('물리학토픽Ⅰ', 2, false, '과학', 3, 1, null, false, null),
+  ('화학토픽Ⅰ', 2, false, '과학', 3, 1, null, false, null),
+  ('생명과학세미나Ⅰ', 2, false, '과학', 3, 1, null, false, null),
+  ('지구과학토픽Ⅰ', 2, false, '과학', 3, 1, null, false, null),
+  ('대수학', 2, false, '과학', 3, 2, null, false, null),
+  ('물리학토픽Ⅱ', 2, false, '과학', 3, 2, null, false, null),
+  ('화학토픽Ⅱ', 2, false, '과학', 3, 2, null, false, null),
+  ('생명과학세미나Ⅱ', 2, false, '과학', 3, 2, null, false, null),
+  ('지구과학토픽Ⅱ', 2, false, '과학', 3, 2, null, false, null),
+  ('객체지향프로그래밍', 3, false, '정보과학', 2, 1, null, false, null),
+  ('인공지능', 3, false, '정보과학', 2, 1, null, false, null),
+  ('자료구조와알고리즘', 3, true, '정보과학', 2, 2, null, false, null),
+  ('정보과학프로젝트', 1, false, '정보과학', 2, 2, null, false, null),
+  ('고급프로그래밍', 2, false, '정보과학', 3, 1, null, false, null),
+  ('고급알고리즘', 2, false, '정보과학', 3, 2, null, false, null),
+  ('미적분학Ⅰ', 3, true, '수학', 2, 1, null, false, null),
+  ('고급수학', 3, false, '수학', 2, 1, null, false, null),
+  ('미적분학Ⅰ', 3, false, '수학', 2, 2, null, false, null),
+  ('응용수학', 3, false, '수학', 2, 2, null, false, null),
+  ('미적분학Ⅱ', 3, true, '수학', 2, 2, null, false, '미적분학Ⅰ'),
+  ('선형대수학', 3, true, '수학', 2, 2, null, false, null),
+  ('미적분학Ⅱ', 3, true, '수학', 3, 1, null, false, '미적분학Ⅰ'),
+  ('선형대수학', 3, true, '수학', 3, 1, null, false, null),
+  ('수학세미나Ⅰ', 2, false, '수학', 3, 1, null, false, null),
+  ('수학세미나Ⅱ', 2, false, '수학', 3, 2, null, false, null),
+  ('융합수학', 3, false, 'AI융합', 2, 1, null, false, null),
+  ('인공지능과화학탐구', 3, false, 'AI융합', 2, 1, null, false, null),
+  ('생활속의데이터과학', 3, false, 'AI융합', 2, 1, null, false, null),
+  ('컴퓨터물리해석', 3, false, 'AI융합', 2, 2, null, false, null),
+  ('AI와바이오테크놀로지', 3, false, 'AI융합', 2, 2, null, false, null),
+  ('인공지능기반정보과학탐구', 3, false, 'AI융합', 2, 2, null, false, null),
+  ('물리학과첨단기술', 2, false, 'AI융합', 3, 1, null, false, null),
+  ('첨단화학', 2, false, 'AI융합', 3, 1, null, false, null),
+  ('AI와디지털생물학', 2, false, 'AI융합', 3, 1, null, false, null),
+  ('가상현실(VR)과과학콘텐츠', 2, false, 'AI융합', 3, 1, null, false, null),
+  ('인공지능융합연구', 2, false, 'AI융합', 3, 1, null, false, null),
+  ('생활속정치와법', 2, false, '사회', 2, 1, null, true, null),
+  ('세계시민과지리', 2, false, '사회', 2, 2, null, true, null),
+  ('여행지리', 2, false, '사회', 3, 1, null, true, null),
+  ('금융과경제생활', 2, false, '사회', 3, 2, '사회-3-2', false, null),
+  ('사회문제탐구', 2, false, '사회', 3, 2, '사회-3-2', false, null),
+  ('문학과디지털미디어', 3, false, '국어', 2, 1, '국어-2-1', false, null),
+  ('독서토론과글쓰기', 3, false, '국어', 2, 1, '국어-2-1', false, null),
+  ('화법과의사소통', 2, false, '국어', 2, 2, '국어-2-2', false, null),
+  ('매체와언어생활탐구', 2, false, '국어', 2, 2, '국어-2-2', false, null),
+  ('창의융합독서', 2, false, '국어', 3, 1, '국어-3-1', false, null),
+  ('문학과인문학', 2, false, '국어', 3, 1, '국어-3-1', false, null),
+  ('창의융합독서', 2, false, '국어', 3, 2, '국어-3-2', false, null),
+  ('문학과인문학', 2, false, '국어', 3, 2, '국어-3-2', false, null),
+  ('시사영어', 3, false, '영어', 2, 1, '영어-2-1', false, null),
+  ('세계문화와영어', 3, false, '영어', 2, 1, '영어-2-1', false, null),
+  ('비판적영어읽기와토론', 2, false, '영어', 2, 2, '영어-2-2', false, null),
+  ('학술영어세미나', 2, false, '영어', 2, 2, '영어-2-2', false, null),
+  ('미디어영어', 2, false, '영어', 3, 1, '영어-3-1a', false, null),
+  ('영어커뮤니케이션', 2, false, '영어', 3, 1, '영어-3-1a', false, null),
+  ('과학사및과학철학', 2, false, '영어', 3, 1, '영어-3-1b', false, null),
+  ('미래사회가치탐구', 2, false, '영어', 3, 1, '영어-3-1b', false, null),
+  ('미디어영어', 2, false, '영어', 3, 2, '영어-3-2', false, null),
+  ('과학사및과학철학', 2, false, '영어', 3, 2, '영어-3-2', false, null),
+  ('미래사회가치탐구', 2, false, '영어', 3, 2, '영어-3-2', false, null),
+  ('일본어', 2, false, '제2외국어', 2, 1, '외국어-2-1', false, null),
+  ('중국어', 2, false, '제2외국어', 2, 1, '외국어-2-1', false, null),
+  ('운동과건강', 1, false, '체육', 2, 1, null, true, null),
+  ('스포츠문화', 1, false, '체육', 2, 2, null, true, null),
+  ('스포츠과학', 1, false, '체육', 3, 1, null, true, null),
+  ('스포츠생활', 1, false, '체육', 3, 2, null, true, null),
+  ('음악과미디어', 1, false, '예술교양', 2, 1, '예술-2-1', false, null),
+  ('미술창작', 1, false, '예술교양', 2, 1, '예술-2-1', false, null),
+  ('음악연주와창작', 1, false, '예술교양', 2, 2, '예술-2-2', false, null),
+  ('미술과매체', 1, false, '예술교양', 2, 2, '예술-2-2', false, null),
+  ('진로설계탐구', 1, false, '예술교양', 3, 1, null, true, null);
