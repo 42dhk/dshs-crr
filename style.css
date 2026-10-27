@@ -1408,3 +1408,44 @@ body {
   font-size: 0.84rem;
   padding: 28px 0;
 }
+
+/* 담당 선생님 */
+.rate-teacher {
+  width: 100%;
+  margin-bottom: 8px;
+  flex: none;
+}
+
+.reviews-teacher {
+  margin-top: 8px;
+}
+
+.review-card__teacher {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.teacher-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.teacher-chip {
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #b57300;
+  background: #fff4d6;
+  border: 1.5px solid #f3d58a;
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.teacher-chip:hover {
+  background: #ffedb8;
+}

@@ -775,6 +775,7 @@ function renderRateList() {
           return `<div class="rate-item${done ? " is-done" : ""}" data-name="${name}" data-value="0">
             <div class="rate-item__name">${name}${avg}</div>
             <div class="rate-stars">${[1, 2, 3, 4, 5].map((v) => `<button type="button" class="star" data-v="${v}" aria-label="${v}점" ${done ? "disabled" : ""}>★</button>`).join("")}</div>
+            <input class="text-input rate-teacher" list="teacher-suggest" maxlength="20" placeholder="담당 선생님 (선택)" ${done ? "disabled" : ""}>
             <textarea class="rate-comment" maxlength="500" placeholder="한 줄 후기 (선택)" ${done ? "disabled" : ""}></textarea>
             <div class="rate-actions"><span class="rate-msg">${done ? "이미 평가했어요 ✓" : ""}</span>
               <button type="button" class="rate-submit" ${done ? "disabled" : ""}>등록</button></div>
@@ -818,7 +819,12 @@ rateList.addEventListener("click", async (e) => {
 
   submit.disabled = true;
   showRateMsg(item, "저장하는 중...");
-  const result = await saveReview(name, rating, item.querySelector(".rate-comment").value.trim());
+  const result = await saveReview(
+    name,
+    rating,
+    item.querySelector(".rate-comment").value.trim(),
+    item.querySelector(".rate-teacher").value
+  );
 
   if (!result.ok) {
     submit.disabled = false;
@@ -828,11 +834,26 @@ rateList.addEventListener("click", async (e) => {
   renderRateList();
 });
 
+// 선생님 이름 통일: "김철수 선생님", "김 철수쌤", "김철수" 가 모두 "김철수"로 저장·검색되게 한다.
+function cleanTeacher(str) {
+  return String(str || "")
+    .replace(/\s+/g, "")
+    .replace(/(선생님|선생|교수님|교수|쌤|샘)$/, "")
+    .slice(0, 20);
+}
+
 // 별점 저장(공통): DB에 넣고, 성공하면 화면의 평균과 "이미 평가함" 기록을 갱신한다.
-async function saveReview(name, rating, comment) {
-  const { error } = await supabaseClient
-    .from("reviews")
-    .insert({ subject_name: name, rating, comment: comment || null });
+async function saveReview(name, rating, comment, teacherInput) {
+  const teacher = cleanTeacher(teacherInput) || null;
+  const row = { subject_name: name, rating, comment: comment || null, teacher };
+  let { error } = await supabaseClient.from("reviews").insert(row);
+
+  // DB에 teacher 열이 아직 없으면(supabase/teacher.sql 실행 전) 선생님 이름만 빼고 다시 저장한다.
+  if (error && /teacher/i.test(`${error.message} ${error.details || ""}`)) {
+    console.warn("teacher 열이 아직 없어 선생님 이름 없이 저장합니다:", error.message);
+    const { teacher: _omit, ...withoutTeacher } = row;
+    ({ error } = await supabaseClient.from("reviews").insert(withoutTeacher));
+  }
   if (error) {
     console.warn("별점 저장 실패:", error);
     return { ok: false, error };
@@ -912,6 +933,9 @@ function selectWriteSubject(name) {
   document.getElementById("write-avg").textContent = r ? `평균 ★${r.avg.toFixed(1)} (${r.count}명)` : "아직 후기가 없어요";
   document.getElementById("write-comment").value = "";
   document.getElementById("write-comment").disabled = done;
+  document.getElementById("write-teacher").value = "";
+  document.getElementById("write-teacher").disabled = done;
+  updateTeacherSuggest(name);
   writeStars.querySelectorAll(".star").forEach((s) => (s.disabled = done));
   setWriteStars(0);
   writeSubmit.disabled = done;
@@ -927,6 +951,7 @@ function openWriteScreen() {
   writeSearch.value = "";
   renderWritePick();
   showScreen("write");
+  if (!reviewsLoaded) loadReviews();
 }
 
 writePick.addEventListener("click", (e) => {
@@ -951,7 +976,12 @@ writeSubmit.addEventListener("click", async () => {
   writeSubmit.disabled = true;
   writeMsg.classList.remove("is-error");
   writeMsg.textContent = "저장하는 중...";
-  const result = await saveReview(writeSelected, writeRating, document.getElementById("write-comment").value.trim());
+  const result = await saveReview(
+    writeSelected,
+    writeRating,
+    document.getElementById("write-comment").value.trim(),
+    document.getElementById("write-teacher").value
+  );
   if (!result.ok) {
     writeSubmit.disabled = false;
     writeMsg.textContent = "저장에 실패했어요. 잠시 후 다시 시도해 주세요.";
@@ -966,6 +996,8 @@ writeSubmit.addEventListener("click", async () => {
 // 후기 열람하기: 최신순 목록 + 과목명/영역 필터
 const reviewsSearch = document.getElementById("reviews-search");
 const reviewsArea = document.getElementById("reviews-area");
+const reviewsTeacher = document.getElementById("reviews-teacher");
+const reviewsBreakdown = document.getElementById("reviews-breakdown");
 const reviewsList = document.getElementById("reviews-list");
 const reviewsSummary = document.getElementById("reviews-summary");
 let reviewsData = [];
@@ -974,11 +1006,14 @@ let reviewsLoaded = false;
 async function loadReviews() {
   reviewsSummary.textContent = "후기를 불러오는 중...";
   reviewsList.innerHTML = "";
-  const { data, error } = await supabaseClient
-    .from("reviews")
-    .select("subject_name,rating,comment,created_at")
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const query = (cols) =>
+    supabaseClient.from("reviews").select(cols).order("created_at", { ascending: false }).limit(300);
+
+  let { data, error } = await query("subject_name,rating,comment,teacher,created_at");
+  // teacher 열이 아직 없으면(supabase/teacher.sql 실행 전) 선생님 없이 읽는다.
+  if (error && /teacher/i.test(`${error.message} ${error.details || ""}`)) {
+    ({ data, error } = await query("subject_name,rating,comment,created_at"));
+  }
   if (error) {
     console.warn("후기 불러오기 실패:", error);
     reviewsData = [];
@@ -989,28 +1024,65 @@ async function loadReviews() {
   const valid = new Set(subjectData.map((s) => s.name));
   reviewsData = data.filter((r) => valid.has(r.subject_name));
   reviewsLoaded = true;
+  updateTeacherSuggest(writeSelected);
   renderReviews();
+}
+
+// 선생님 이름 자동완성: 고른 과목에 후기가 있던 선생님을 먼저, 없으면 전체 선생님을 보여준다.
+function updateTeacherSuggest(subjectName) {
+  const all = [...new Set(reviewsData.map((r) => r.teacher).filter(Boolean))].sort();
+  const ofSubject = subjectName
+    ? [...new Set(reviewsData.filter((r) => r.subject_name === subjectName).map((r) => r.teacher).filter(Boolean))]
+    : [];
+  const list = ofSubject.length ? ofSubject : all;
+  document.getElementById("teacher-suggest").innerHTML = list.map((t) => `<option value="${escapeHtml(t)}">`).join("");
+  document.getElementById("teacher-suggest-all").innerHTML = all.map((t) => `<option value="${escapeHtml(t)}">`).join("");
+}
+
+function starsHtml(n) {
+  return `${"★".repeat(n)}<span style="color:#d8d2df">${"★".repeat(5 - n)}</span>`;
 }
 
 function renderReviews() {
   if (reviewsArea.options.length === 1) AREA_ORDER.forEach((a) => reviewsArea.add(new Option(a, a)));
   const q = normalizeName(reviewsSearch.value.trim());
+  const t = cleanTeacher(reviewsTeacher.value);
   const area = reviewsArea.value;
   const areaOf = {};
   subjectData.forEach((s) => (areaOf[s.name] = areaOf[s.name] || s.area));
 
   const rows = reviewsData.filter(
-    (r) => (!q || normalizeName(r.subject_name).includes(q)) && (!area || areaOf[r.subject_name] === area)
+    (r) =>
+      (!q || normalizeName(r.subject_name).includes(q)) &&
+      (!t || (r.teacher || "").includes(t)) &&
+      (!area || areaOf[r.subject_name] === area)
   );
 
   const names = new Set(rows.map((r) => r.subject_name));
+  const teachers = new Set(rows.map((r) => r.teacher).filter(Boolean));
+  reviewsBreakdown.innerHTML = "";
   if (!rows.length) {
     reviewsSummary.textContent = "";
-  } else if (names.size === 1) {
-    const avg = rows.reduce((sum, r) => sum + r.rating, 0) / rows.length;
-    reviewsSummary.innerHTML = `<b>★${avg.toFixed(1)}</b> · 후기 ${rows.length}개`;
   } else {
-    reviewsSummary.textContent = `후기 ${rows.length}개 · 과목 ${names.size}개`;
+    const avg = rows.reduce((sum, r) => sum + r.rating, 0) / rows.length;
+    const scope = [t ? `${escapeHtml(t)} 선생님` : "", names.size > 1 ? `과목 ${names.size}개` : ""].filter(Boolean).join(" · ");
+    reviewsSummary.innerHTML = `<b>★${avg.toFixed(1)}</b> · 후기 ${rows.length}개${scope ? " · " + scope : ""}`;
+
+    // 한 과목만 보고 있고 선생님이 둘 이상이면 선생님별 평균을 칩으로 보여준다(누르면 그 선생님만 보기).
+    if (names.size === 1 && teachers.size > 1 && !t) {
+      const byTeacher = {};
+      rows.forEach((r) => {
+        const key = r.teacher || "";
+        if (!key) return;
+        (byTeacher[key] ||= { sum: 0, n: 0 });
+        byTeacher[key].sum += r.rating;
+        byTeacher[key].n += 1;
+      });
+      reviewsBreakdown.innerHTML = Object.entries(byTeacher)
+        .sort((a, b) => b[1].sum / b[1].n - a[1].sum / a[1].n)
+        .map(([name, v]) => `<button type="button" class="teacher-chip" data-teacher="${escapeHtml(name)}">${escapeHtml(name)} ★${(v.sum / v.n).toFixed(1)} (${v.n})</button>`)
+        .join("");
+    }
   }
 
   reviewsList.innerHTML = rows.length
@@ -1018,8 +1090,9 @@ function renderReviews() {
         .map((r) => {
           const date = new Date(r.created_at).toLocaleDateString("ko-KR");
           const comment = r.comment ? `<p class="review-card__comment">${escapeHtml(r.comment)}</p>` : "";
-          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}</span>
-            <span class="review-card__stars">${"★".repeat(r.rating)}<span style="color:#d8d2df">${"★".repeat(5 - r.rating)}</span></span></div>${comment}
+          const teacher = r.teacher ? `<span class="review-card__teacher">${escapeHtml(r.teacher)} 선생님</span>` : "";
+          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}${teacher}</span>
+            <span class="review-card__stars">${starsHtml(r.rating)}</span></div>${comment}
             <div class="review-card__date">${date}</div></div>`;
         })
         .join("")
@@ -1027,6 +1100,13 @@ function renderReviews() {
 }
 
 reviewsSearch.addEventListener("input", renderReviews);
+reviewsTeacher.addEventListener("input", renderReviews);
+reviewsBreakdown.addEventListener("click", (e) => {
+  const chip = e.target.closest(".teacher-chip");
+  if (!chip) return;
+  reviewsTeacher.value = chip.dataset.teacher;
+  renderReviews();
+});
 reviewsArea.addEventListener("change", renderReviews);
 
 function openReviewsScreen() {

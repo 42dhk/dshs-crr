@@ -268,6 +268,7 @@
         <button type="button" class="star" data-v="4" aria-label="4점">★</button>
         <button type="button" class="star" data-v="5" aria-label="5점">★</button>
       </div>
+      <input id="write-teacher" class="text-input rate-teacher" list="teacher-suggest" maxlength="20" placeholder="담당 선생님 (선택, 예: 김철수)" autocomplete="off">
       <textarea id="write-comment" class="rate-comment" maxlength="500" placeholder="한 줄 후기 (선택, 500자까지)"></textarea>
       <div class="rate-actions"><span id="write-msg" class="rate-msg"></span><button type="button" id="write-submit" class="rate-submit">등록</button></div>
     </div>
@@ -283,8 +284,10 @@
     <p class="screen-subtitle">다른 학생들이 남긴 별점과 후기를 최신순으로 볼 수 있어요.</p>
 
     <input id="reviews-search" class="text-input pick-search" type="search" placeholder="과목 이름 검색 (예: 화학)">
+    <input id="reviews-teacher" class="text-input pick-search reviews-teacher" type="search" list="teacher-suggest-all" placeholder="선생님 이름 검색 (예: 김철수)" autocomplete="off">
     <select id="reviews-area" class="select reviews-area"><option value="">전체 영역</option></select>
     <div id="reviews-summary" class="reviews-summary"></div>
+    <div id="reviews-breakdown" class="teacher-chips"></div>
     <div id="reviews-list" class="reviews-list"></div>
   </section>
 
@@ -300,6 +303,8 @@
     </div>
   </div>
 
+  <datalist id="teacher-suggest"></datalist>
+  <datalist id="teacher-suggest-all"></datalist>
 </div>
 
 <!-- 넓은 화면에서만 보이는 오른쪽 패널: 과목 검색 -->
