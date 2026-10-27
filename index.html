@@ -11,6 +11,40 @@
 </head>
 <body>
 
+<!-- 넓은 화면에서만 보이는 왼쪽 패널: 지금까지 입력한 내용을 실시간으로 요약 -->
+<aside class="side side--left" aria-label="입력 요약">
+  <div class="side-card">
+    <div class="side-card__title">내 입력 요약</div>
+    <dl class="summary">
+      <div class="summary__row"><dt>현재 단계</dt><dd id="sum-step">시작</dd></div>
+      <div class="summary__row"><dt>학년 · 학기</dt><dd id="sum-term">2학년 1학기</dd></div>
+      <div class="summary__row"><dt>수강신청표 사진</dt><dd id="sum-photos">0장</dd></div>
+      <div class="summary__row"><dt>들은 과목</dt><dd id="sum-taken">0개</dd></div>
+      <div class="summary__row"><dt>폐강 과목</dt><dd id="sum-cancelled">0개</dd></div>
+      <div class="summary__row"><dt>AP 선호</dt><dd id="sum-ap">꺼짐</dd></div>
+    </dl>
+    <div class="summary__block">
+      <div class="summary__label">관심 분야</div>
+      <div id="sum-interests" class="summary__tags"></div>
+    </div>
+    <div class="summary__block">
+      <div class="summary__label">비선호 과목/분야</div>
+      <div id="sum-dislikes" class="summary__tags"></div>
+    </div>
+  </div>
+
+  <div class="side-card">
+    <div class="side-card__title">추천 규칙</div>
+    <ul class="rule-list">
+      <li>이미 들은 과목과 폐강 과목은 추천에서 빠져요.</li>
+      <li>Ⅱ과목·물리/화학 실험은 선이수 조건을 따져요.</li>
+      <li><b>*</b> 표시 AP 과목은 학점보다 주 1시수가 더 들어요.</li>
+      <li>일주일은 36시수예요. 남는 시수가 공강이에요.</li>
+      <li>졸업 기준에서 영역이 통째로 빠진 안은 버려요.</li>
+    </ul>
+  </div>
+</aside>
+
 <div class="app-frame">
 
   <!-- 화면 1: 시작 화면 -->
@@ -209,6 +243,25 @@
   </section>
 
 </div>
+
+<!-- 넓은 화면에서만 보이는 오른쪽 패널: 과목 검색 -->
+<aside class="side side--right" aria-label="과목 찾기">
+  <div class="side-card side-card--grow">
+    <div class="side-card__title">과목 찾기</div>
+    <input id="search-input" class="text-input" type="search" placeholder="과목 이름으로 검색 (예: 화학)">
+    <select id="search-area" class="select search-area">
+      <option value="">전체 영역</option>
+    </select>
+    <div id="search-status" class="search-status"></div>
+    <div id="search-results" class="search-results"></div>
+  </div>
+
+  <div class="side-card">
+    <div class="side-card__title">졸업 최소이수학점 기준</div>
+    <div id="side-grad" class="side-grad"></div>
+    <div class="side-foot"><span id="data-dot" class="dot"></span><span id="data-source">과목 데이터 불러오는 중</span></div>
+  </div>
+</aside>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>

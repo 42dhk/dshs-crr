@@ -588,3 +588,85 @@ document.getElementById("btn-restart").addEventListener("click", () => {
 
 updateSubmitState();
 updateUploadState();
+
+// ── 넓은 화면 양옆 패널: 입력 요약 / 과목 검색 ──────────────────────
+const stepNames = { "screen-start": "시작", "screen-upload": "① 사진 업로드", "screen-input": "② 정보 입력", "screen-loading": "추천 계산 중", "screen-result": "③ 추천 결과" };
+
+function tagsHtml(list, bad) {
+  if (!list.length) return '<span class="summary__empty">없음</span>';
+  return list.map((t) => `<span class="summary__tag${bad ? " is-bad" : ""}">${t}</span>`).join("");
+}
+
+function updateSummary() {
+  const { grade, term } = selectedGradeTerm();
+  const selIdx = termIndex(grade, term);
+  const active = document.querySelector(".screen.active");
+  const priorNames = new Set(subjectData.filter((s) => termIndex(s.grade, s.term) < selIdx).map((s) => s.name));
+  const takenCount = [...takenNames].filter((n) => priorNames.has(n)).length;
+  const cancelledCount = [...cancelledKeys].filter((k) => k.startsWith(`${grade}-${term}|`)).length;
+
+  document.getElementById("sum-step").textContent = stepNames[active && active.id] || "-";
+  document.getElementById("sum-term").textContent = `${grade}학년 ${term}학기`;
+  document.getElementById("sum-photos").textContent = `${photos.length}장`;
+  document.getElementById("sum-taken").textContent = `${takenCount}개`;
+  document.getElementById("sum-cancelled").textContent = `${cancelledCount}개`;
+  document.getElementById("sum-ap").textContent = apToggle.classList.contains("on") ? "켜짐" : "꺼짐";
+  document.getElementById("sum-interests").innerHTML = tagsHtml(
+    Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag)
+  );
+  document.getElementById("sum-dislikes").innerHTML = tagsHtml(Array.from(dislikes), true);
+}
+
+// 클릭·입력·화면 전환이 일어난 직후마다 요약을 새로 그린다.
+["click", "change", "input", "contextmenu", "transitionend"].forEach((ev) =>
+  document.addEventListener(ev, () => setTimeout(updateSummary, 0))
+);
+
+const searchInput = document.getElementById("search-input");
+const searchArea = document.getElementById("search-area");
+const searchResults = document.getElementById("search-results");
+const searchStatus = document.getElementById("search-status");
+const AREA_ORDER = ["과학", "정보과학", "수학", "AI융합", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
+
+function renderSearch() {
+  const q = normalizeName(searchInput.value.trim());
+  const area = searchArea.value;
+
+  // 같은 과목이 여러 학기에 열리면 하나로 묶어서 "개설 학기"를 나열한다.
+  const byName = new Map();
+  subjectData.forEach((s) => {
+    const key = `${s.area}|${s.name}`;
+    if (!byName.has(key)) byName.set(key, { ...s, terms: [] });
+    byName.get(key).terms.push(`${s.grade}-${s.term}`);
+  });
+
+  const hits = [...byName.values()].filter(
+    (s) => (!area || s.area === area) && (!q || normalizeName(s.name).includes(q))
+  );
+  searchStatus.textContent = `${hits.length}개 과목` + (hits.length > 40 ? " (위에서 40개만 표시)" : "");
+  searchResults.innerHTML = hits
+    .slice(0, 40)
+    .map(
+      (s) => `<div class="search-item"><div class="search-item__name">${s.name}${s.ap ? ' <span class="search-item__ap">AP</span>' : ""}</div>
+        <div class="search-item__meta">${s.area} · ${s.credit}학점${s.ap ? ` (시수 ${s.credit + 1})` : ""} · 개설 ${s.terms.join(", ")}${s.requires ? `<br>선이수: ${s.requires}` : ""}${s.group ? "<br>택일 과목" : ""}${s.mandatory ? "<br>필수 과목" : ""}</div></div>`
+    )
+    .join("");
+}
+
+function initSidePanels() {
+  if (searchArea.options.length === 1) {
+    AREA_ORDER.forEach((a) => searchArea.add(new Option(a, a)));
+  }
+  document.getElementById("side-grad").innerHTML = GRADUATION_MIN_CREDITS.map(
+    (r) => `<div><b>${r.label}</b><br>${r.options.map((o) => o.join("+")).join(" 또는 ")}학점</div>`
+  ).join("<div style='height:6px'></div>");
+  document.getElementById("data-source").textContent = `과목 데이터: ${subjectSource} (${subjectData.length}과목)`;
+  document.getElementById("data-dot").classList.toggle("is-on", subjectSource === "Supabase DB");
+  renderSearch();
+  updateSummary();
+}
+
+searchInput.addEventListener("input", renderSearch);
+searchArea.addEventListener("change", renderSearch);
+subjectsReady.then(initSidePanels);
+initSidePanels();
