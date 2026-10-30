@@ -1449,3 +1449,32 @@ body {
 .teacher-chip:hover {
   background: #ffedb8;
 }
+
+/* 목록에 없는 과목 */
+.pick-item--custom {
+  border-style: dashed;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.review-card__tag {
+  margin-left: 6px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--bg-1);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.review-card__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 0;
+}
+
+.review-card__teacher {
+  white-space: nowrap;
+}

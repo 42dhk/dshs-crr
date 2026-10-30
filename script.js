@@ -910,14 +910,28 @@ function uniqueSubjectNames() {
   return [...new Set(subjectData.map((s) => s.name))];
 }
 
+// 사용자가 친 과목명을 정리한다: 공백 정리 + 30자 제한 + (띄어쓰기/대소문자만 다르면) 목록의 과목명으로 맞춤
+function canonicalSubjectName(raw) {
+  const cleaned = String(raw).trim().replace(/\s+/g, " ").slice(0, 30);
+  const key = cleaned.replace(/\s/g, "").toLowerCase();
+  return uniqueSubjectNames().find((n) => n.replace(/\s/g, "").toLowerCase() === key) || cleaned;
+}
+
 function renderWritePick() {
-  const q = normalizeName(writeSearch.value.trim());
-  const names = uniqueSubjectNames().filter((n) => !q || normalizeName(n).includes(q));
-  writePick.innerHTML = names.length
-    ? names
-        .map((n) => `<button type="button" class="pick-item${n === writeSelected ? " is-selected" : ""}" data-name="${escapeHtml(n)}">${escapeHtml(n)}</button>`)
-        .join("")
-    : '<span class="summary__empty">검색된 과목이 없어요</span>';
+  const raw = writeSearch.value.trim().replace(/\s+/g, " ");
+  const q = normalizeName(raw);
+  const all = uniqueSubjectNames();
+  const names = all.filter((n) => !q || normalizeName(n).includes(q));
+  let html = names
+    .map((n) => `<button type="button" class="pick-item${n === writeSelected ? " is-selected" : ""}" data-name="${escapeHtml(n)}">${escapeHtml(n)}</button>`)
+    .join("");
+
+  // 검색어와 똑같은 과목이 목록에 없으면 "직접 추가" 버튼을 보여준다.
+  const canonical = raw ? canonicalSubjectName(raw) : "";
+  if (raw && !all.includes(canonical)) {
+    html += `<button type="button" class="pick-item pick-item--custom${canonical === writeSelected ? " is-selected" : ""}" data-custom="${escapeHtml(raw)}">+ '${escapeHtml(canonical)}' 직접 추가</button>`;
+  }
+  writePick.innerHTML = html || '<span class="summary__empty">과목 이름을 검색해 보세요</span>';
 }
 
 function setWriteStars(v) {
@@ -930,7 +944,9 @@ function selectWriteSubject(name) {
   const done = getRated().has(name);
   const r = subjectRatings[name];
   document.getElementById("write-name").textContent = name;
-  document.getElementById("write-avg").textContent = r ? `평균 ★${r.avg.toFixed(1)} (${r.count}명)` : "아직 후기가 없어요";
+  const isCustom = !uniqueSubjectNames().includes(name);
+  document.getElementById("write-avg").textContent =
+    (r ? `평균 ★${r.avg.toFixed(1)} (${r.count}명)` : "아직 후기가 없어요") + (isCustom ? " · 목록에 없는 과목" : "");
   document.getElementById("write-comment").value = "";
   document.getElementById("write-comment").disabled = done;
   document.getElementById("write-teacher").value = "";
@@ -956,7 +972,8 @@ function openWriteScreen() {
 
 writePick.addEventListener("click", (e) => {
   const b = e.target.closest(".pick-item");
-  if (b) selectWriteSubject(b.dataset.name);
+  if (!b) return;
+  selectWriteSubject(b.dataset.custom ? canonicalSubjectName(b.dataset.custom) : b.dataset.name);
 });
 writeSearch.addEventListener("input", renderWritePick);
 writeStars.addEventListener("click", (e) => {
@@ -984,7 +1001,10 @@ writeSubmit.addEventListener("click", async () => {
   );
   if (!result.ok) {
     writeSubmit.disabled = false;
-    writeMsg.textContent = "저장에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    const rejected = result.error && result.error.code === "42501" && !uniqueSubjectNames().includes(writeSelected);
+    writeMsg.textContent = rejected
+      ? "목록에 없는 과목은 아직 저장할 수 없어요. (DB 설정이 필요해요)"
+      : "저장에 실패했어요. 잠시 후 다시 시도해 주세요.";
     writeMsg.classList.add("is-error");
     return;
   }
@@ -1020,9 +1040,7 @@ async function loadReviews() {
     reviewsSummary.textContent = "후기를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
     return;
   }
-  // 수강신청표에 실제로 있는 과목의 후기만 보여준다.
-  const valid = new Set(subjectData.map((s) => s.name));
-  reviewsData = data.filter((r) => valid.has(r.subject_name));
+  reviewsData = data; // 수강신청표에 없는 과목의 후기도 보여준다(카드에 "목록 외 과목" 표시)
   reviewsLoaded = true;
   updateTeacherSuggest(writeSelected);
   renderReviews();
@@ -1091,7 +1109,8 @@ function renderReviews() {
           const date = new Date(r.created_at).toLocaleDateString("ko-KR");
           const comment = r.comment ? `<p class="review-card__comment">${escapeHtml(r.comment)}</p>` : "";
           const teacher = r.teacher ? `<span class="review-card__teacher">${escapeHtml(r.teacher)} 선생님</span>` : "";
-          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}${teacher}</span>
+          const extra = areaOf[r.subject_name] ? "" : '<span class="review-card__tag">목록 외 과목</span>';
+          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}${extra}${teacher}</span>
             <span class="review-card__stars">${starsHtml(r.rating)}</span></div>${comment}
             <div class="review-card__date">${date}</div></div>`;
         })
