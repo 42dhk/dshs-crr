@@ -1258,3 +1258,116 @@ function openReviewsScreen() {
 
 document.getElementById("btn-go-write").addEventListener("click", () => subjectsReady.then(openWriteScreen));
 document.getElementById("btn-go-read").addEventListener("click", () => subjectsReady.then(openReviewsScreen));
+
+// ── 모바일 사이드 패널(서랍): 화살표 탭 / 가장자리에서 밀어 열기 / 밀거나 바깥을 눌러 닫기 ──
+const narrowQuery = window.matchMedia("(max-width: 1099px)");
+const drawerEl = { left: document.querySelector(".side--left"), right: document.querySelector(".side--right") };
+const handleEl = { left: document.getElementById("handle-left"), right: document.getElementById("handle-right") };
+let drawerDrag = null;
+let lastDragAt = 0;
+
+function drawerIsOpen(side) {
+  return document.body.classList.contains(`drawer-${side}-open`);
+}
+
+function setDrawer(side, open) {
+  const other = side === "left" ? "right" : "left";
+  document.body.classList.toggle(`drawer-${side}-open`, open);
+  if (open) document.body.classList.remove(`drawer-${other}-open`);
+  handleEl.left.setAttribute("aria-expanded", String(drawerIsOpen("left")));
+  handleEl.right.setAttribute("aria-expanded", String(drawerIsOpen("right")));
+  if (open) updateSummary();
+}
+
+function closeDrawers() {
+  setDrawer("left", false);
+  setDrawer("right", false);
+}
+
+function clearDragStyle(el) {
+  el.style.transition = "";
+  el.style.transform = "";
+  el.style.visibility = "";
+}
+
+["left", "right"].forEach((side) => {
+  handleEl[side].addEventListener("click", () => {
+    if (Date.now() - lastDragAt < 350) return; // 드래그 직후에 생기는 클릭은 무시
+    setDrawer(side, !drawerIsOpen(side));
+  });
+});
+document.querySelectorAll(".side-close").forEach((b) => b.addEventListener("click", closeDrawers));
+document.getElementById("side-backdrop").addEventListener("click", closeDrawers);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDrawers();
+});
+
+// 화면 폭이 넓어져 서랍이 필요 없어지면 열린 상태와 드래그 흔적을 정리한다.
+narrowQuery.addEventListener("change", () => {
+  if (!narrowQuery.matches) {
+    closeDrawers();
+    clearDragStyle(drawerEl.left);
+    clearDragStyle(drawerEl.right);
+  }
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (!narrowQuery.matches || e.button > 0) return;
+  const t = e.target;
+  let side = null;
+  let action = null;
+
+  if (drawerIsOpen("left") && t.closest(".side--left")) [side, action] = ["left", "close"];
+  else if (drawerIsOpen("right") && t.closest(".side--right")) [side, action] = ["right", "close"];
+  else if (!drawerIsOpen("left") && !drawerIsOpen("right")) {
+    if (t.closest("#edge-left, #handle-left")) [side, action] = ["left", "open"];
+    else if (t.closest("#edge-right, #handle-right")) [side, action] = ["right", "open"];
+  }
+  if (!side) return;
+
+  drawerDrag = { side, action, el: drawerEl[side], width: drawerEl[side].offsetWidth, x0: e.clientX, y0: e.clientY, offset: null, moved: false };
+});
+
+document.addEventListener("pointermove", (e) => {
+  const d = drawerDrag;
+  if (!d) return;
+  const dx = e.clientX - d.x0;
+  const dy = e.clientY - d.y0;
+
+  if (!d.moved) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      drawerDrag = null; // 세로로 움직이면 스크롤로 보고 서랍 동작은 취소
+      return;
+    }
+    d.moved = true;
+    d.el.style.transition = "none";
+    d.el.style.visibility = "visible";
+    document.getElementById("side-backdrop").style.transition = "none";
+  }
+
+  // offset: 서랍이 닫힌 위치(왼쪽은 -width, 오른쪽은 +width)와 열린 위치(0) 사이의 현재 위치
+  const closed = d.side === "left" ? -d.width : d.width;
+  const base = d.action === "open" ? closed : 0;
+  const raw = base + dx;
+  d.offset = d.side === "left" ? Math.min(0, Math.max(closed, raw)) : Math.max(0, Math.min(closed, raw));
+  d.el.style.transform = `translateX(${d.offset}px)`;
+  document.getElementById("side-backdrop").style.opacity = String(1 - Math.abs(d.offset) / d.width);
+  document.getElementById("side-backdrop").style.pointerEvents = "none";
+});
+
+function finishDrawerDrag() {
+  const d = drawerDrag;
+  drawerDrag = null;
+  if (!d || !d.moved) return;
+  lastDragAt = Date.now();
+  const shown = 1 - Math.abs(d.offset) / d.width; // 얼마나 열려 있는지(0~1)
+  const backdrop = document.getElementById("side-backdrop");
+  clearDragStyle(d.el);
+  backdrop.style.transition = "";
+  backdrop.style.opacity = "";
+  backdrop.style.pointerEvents = "";
+  setDrawer(d.side, shown > 0.5);
+}
+document.addEventListener("pointerup", finishDrawerDrag);
+document.addEventListener("pointercancel", finishDrawerDrag);

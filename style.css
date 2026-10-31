@@ -1541,3 +1541,159 @@ body {
   color: var(--danger);
   background: var(--danger-light);
 }
+
+/* ── 좁은 화면(모바일/태블릿): 양옆 패널을 가장자리에서 밀려 나오는 서랍으로 ── */
+.side-close,
+.side-handle,
+.edge-zone,
+.side-backdrop {
+  display: none;
+}
+
+@media (max-width: 1099px) {
+  .side {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    height: auto;
+    width: min(330px, 88vw);
+    padding: 52px 14px 16px;
+    z-index: 60;
+    background: #ebe7f0;
+    box-shadow: 0 0 40px rgba(30, 26, 40, 0.35);
+    visibility: hidden;
+    touch-action: pan-y;
+    transition: transform 0.28s ease, visibility 0s linear 0.28s;
+  }
+
+  .side--left {
+    left: 0;
+    transform: translateX(-104%);
+    border-radius: 0 22px 22px 0;
+  }
+
+  .side--right {
+    right: 0;
+    transform: translateX(104%);
+    border-radius: 22px 0 0 22px;
+  }
+
+  body.drawer-left-open .side--left,
+  body.drawer-right-open .side--right {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.28s ease, visibility 0s;
+  }
+
+  .side-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    color: var(--ink-soft);
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .side--right .side-close {
+    right: auto;
+    left: 12px;
+  }
+
+  /* 가장자리 화살표 탭 */
+  .side-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 50%;
+    width: 22px;
+    height: 76px;
+    margin-top: -38px;
+    padding: 0;
+    border: none;
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--primary-dark);
+    font-family: inherit;
+    font-size: 1.5rem;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 50;
+    box-shadow: 0 2px 10px rgba(30, 26, 40, 0.18);
+    touch-action: pan-y;
+    transition: opacity 0.2s ease;
+  }
+
+  .side-handle--left {
+    left: 0;
+    border-radius: 0 12px 12px 0;
+    animation: handle-nudge-left 1.2s ease 1.2s 2;
+  }
+
+  .side-handle--right {
+    right: 0;
+    border-radius: 12px 0 0 12px;
+    animation: handle-nudge-right 1.2s ease 1.2s 2;
+  }
+
+  body.drawer-left-open .side-handle,
+  body.drawer-right-open .side-handle {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 화면 맨 끝에서 안쪽으로 미는 동작을 받는 얇은 영역 */
+  .edge-zone {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    z-index: 49;
+    touch-action: pan-y;
+  }
+
+  .edge-zone--left {
+    left: 0;
+  }
+
+  .edge-zone--right {
+    right: 0;
+  }
+
+  .side-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(30, 26, 40, 0.42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+  }
+
+  body.drawer-left-open .side-backdrop,
+  body.drawer-right-open .side-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@keyframes handle-nudge-left {
+  0%, 100% { transform: translateX(0); }
+  40% { transform: translateX(7px); }
+}
+
+@keyframes handle-nudge-right {
+  0%, 100% { transform: translateX(0); }
+  40% { transform: translateX(-7px); }
+}

@@ -13,6 +13,7 @@
 
 <!-- 넓은 화면에서만 보이는 왼쪽 패널: 지금까지 입력한 내용을 실시간으로 요약 -->
 <aside class="side side--left" aria-label="입력 요약">
+  <button type="button" class="side-close" data-close="left" aria-label="입력 요약 닫기">✕</button>
   <div class="side-card">
     <div class="side-card__title">내 입력 요약</div>
     <dl class="summary">
@@ -309,6 +310,7 @@
 
 <!-- 넓은 화면에서만 보이는 오른쪽 패널: 과목 검색 -->
 <aside class="side side--right" aria-label="과목 찾기">
+  <button type="button" class="side-close" data-close="right" aria-label="과목 찾기 닫기">✕</button>
   <div class="side-card side-card--grow">
     <div class="side-card__title">과목 찾기</div>
     <input id="search-input" class="text-input" type="search" placeholder="과목 이름으로 검색 (예: 화학)">
@@ -325,6 +327,13 @@
     <div class="side-foot"><span id="data-dot" class="dot"></span><span id="data-source">과목 데이터 불러오는 중</span></div>
   </div>
 </aside>
+
+<!-- 좁은 화면(모바일)에서만 쓰는 사이드 패널 손잡이: 화살표 탭 / 가장자리 스와이프 영역 / 바깥 어두운 배경 -->
+<div id="edge-left" class="edge-zone edge-zone--left" aria-hidden="true"></div>
+<div id="edge-right" class="edge-zone edge-zone--right" aria-hidden="true"></div>
+<button type="button" id="handle-left" class="side-handle side-handle--left" aria-label="입력 요약 열기" aria-expanded="false">›</button>
+<button type="button" id="handle-right" class="side-handle side-handle--right" aria-label="과목 찾기 열기" aria-expanded="false">‹</button>
+<div id="side-backdrop" class="side-backdrop"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
