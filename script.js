@@ -1,15 +1,35 @@
 // 화면 전환 + subjects.js의 과목 데이터를 이용한 시간표 추천 로직입니다.
 
-// 관심 분야 칩 → 과목 영역/키워드 매핑 (interestScore 계산에 사용)
+// 전체 영역 순서(화면 표시용). 과학/정보과학/수학/AI융합 = 전문기본선택, 과학정보수학/AI융합(심화) = 전문심화선택.
+const AREA_ORDER = ["과학", "정보과학", "수학", "AI융합", "과학정보수학", "AI융합(심화)", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
+
+// 관심 분야 칩 → 과목 영역/키워드 규칙 (interestScore 계산에 사용)
+// strict: true 이면 키워드가 맞는 과목만 가산하고, 같은 영역의 다른 과목에는 점수를 주지 않는다.
 const INTEREST_MAP = {
-  "수학": { areas: ["수학"] },
-  "물리": { areas: ["과학"], keyword: "물리" },
-  "화학": { areas: ["과학", "AI융합"], keyword: "화학" },
-  "생명과학": { areas: ["과학"], keyword: ["생명", "생물"] },
-  "정보과학": { areas: ["정보과학", "AI융합"] },
-  "인문사회": { areas: ["국어", "사회"] },
-  "예술": { areas: ["예술교양"] },
-  "체육": { areas: ["체육"] },
+  "수학": [
+    { areas: ["수학"] },
+    { areas: ["과학정보수학"], keyword: ["수학", "대수"], strict: true },
+  ],
+  "물리": [
+    { areas: ["과학"], keyword: "물리" },
+    { areas: ["AI융합", "과학정보수학", "AI융합(심화)"], keyword: "물리", strict: true },
+  ],
+  "화학": [
+    { areas: ["과학"], keyword: "화학" },
+    { areas: ["AI융합", "과학정보수학", "AI융합(심화)"], keyword: "화학", strict: true },
+  ],
+  "생명과학": [
+    { areas: ["과학"], keyword: ["생명", "생물"] },
+    { areas: ["AI융합", "과학정보수학", "AI융합(심화)"], keyword: ["생명", "생물", "바이오"], strict: true },
+  ],
+  "정보과학": [
+    { areas: ["정보과학", "AI융합"] },
+    { areas: ["과학정보수학"], keyword: ["프로그래밍", "알고리즘"], strict: true },
+    { areas: ["AI융합(심화)"], keyword: ["인공지능", "AI", "가상현실"], strict: true },
+  ],
+  "인문사회": [{ areas: ["국어", "사회"] }],
+  "예술": [{ areas: ["예술교양"] }],
+  "체육": [{ areas: ["체육"] }],
 };
 
 // 비선호 입력어 동의어(사용자가 줄여 쓰는 표현 보정용)
@@ -34,14 +54,16 @@ function isSimilarToDislike(subjectName, dislikeTerms) {
 function interestScore(subjectItem, interests) {
   let score = 0;
   interests.forEach((tag) => {
-    const rule = INTEREST_MAP[tag];
-    if (!rule || !rule.areas.includes(subjectItem.area)) return;
-    if (!rule.keyword) {
-      score += 2;
-      return;
-    }
-    const keywords = Array.isArray(rule.keyword) ? rule.keyword : [rule.keyword];
-    score += keywords.some((k) => subjectItem.name.includes(k)) ? 2 : 0.5;
+    (INTEREST_MAP[tag] || []).forEach((rule) => {
+      if (!rule.areas.includes(subjectItem.area)) return;
+      if (!rule.keyword) {
+        score += 2;
+        return;
+      }
+      const keywords = Array.isArray(rule.keyword) ? rule.keyword : [rule.keyword];
+      if (keywords.some((k) => subjectItem.name.includes(k))) score += 2;
+      else if (!rule.strict) score += 0.5;
+    });
   });
   return score;
 }
@@ -54,6 +76,9 @@ async function loadSubjectsFromDb() {
   try {
     const { data, error } = await supabaseClient.from("subjects").select("*").order("id");
     if (error || !data || data.length === 0) throw error || new Error("빈 결과");
+    // DB의 과목 분류가 옛 버전(세미나·토픽이 과학/수학에 흩어진 상태)이면 맞지 않으므로 로컬 데이터를 쓴다.
+    // supabase/reseed-subjects.sql 을 실행해 DB를 최신으로 맞추면 자동으로 DB 데이터를 쓴다.
+    if (!data.some((r) => r.area === "과학정보수학")) throw new Error("DB 과목 분류가 최신이 아님(reseed-subjects.sql 필요)");
     subjectData = data.map((r) => ({
       id: `db${r.id}`,
       name: r.name,
@@ -112,17 +137,86 @@ function ratingBonus(name) {
   return adjusted - RATING_PRIOR;
 }
 
-// 졸업 최소이수학점 기준에 등장하는 4개 전공 영역. buildPlan이 이 영역들을
-// "담을 수 있었는데 0학점으로 비워뒀는지" 판정하는 데 사용한다.
-const MAJOR_AREAS = ["과학", "정보과학", "수학", "AI융합"];
+// 졸업 이수학점 기준에 쓰이는 6개 영역(전문기본선택 4개 + 전문심화선택 2개)
+const GRAD_AREAS = ["과학", "정보과학", "수학", "AI융합", "과학정보수학", "AI융합(심화)"];
+
+// 졸업 기준 계산에 필요한 현재 상황:
+//  - earned: 지금까지 "들은 과목"으로 체크한 과목의 영역별 학점
+//  - future: 이번 학기 이후 학기에 열리는 과목(이름 기준 중복 제거, 이미 들은 과목 제외) 영역별 {과목명 -> 학점}
+//  - termsLeft: 이번 학기를 포함해 남은 학기 수
+function gradContext(grade, term, completed) {
+  const selIdx = termIndex(grade, term);
+  const byName = {};
+  subjectData.forEach((s) => (byName[s.name] ||= s));
+
+  const earned = {};
+  completed.forEach((n) => {
+    const s = byName[n];
+    if (s && GRAD_AREAS.includes(s.area)) earned[s.area] = (earned[s.area] || 0) + s.credit;
+  });
+
+  const future = {};
+  subjectData.forEach((s) => {
+    if (termIndex(s.grade, s.term) <= selIdx || !GRAD_AREAS.includes(s.area) || completed.has(s.name)) return;
+    (future[s.area] ||= new Map()).set(s.name, s.credit);
+  });
+
+  return { earned, future, termsLeft: 5 - selIdx };
+}
+
+// 한 시간표 안이 졸업 기준(3개 묶음)에 어떤 상태인지 계산한다.
+//  met: 이번 안까지 포함해 이미 기준 충족 / ok: 앞으로 학기들에서 채울 수 있음 / impossible: 남은 학기를 다 써도 불가능
+function gradProgress(subjects, ctx) {
+  const inPlan = new Set(subjects.map((s) => s.name));
+  const have = {};
+  const fut = {};
+  GRAD_AREAS.forEach((a) => {
+    have[a] = (ctx.earned[a] || 0) + subjects.filter((s) => s.area === a).reduce((t, s) => t + s.credit, 0);
+    fut[a] = 0;
+    (ctx.future[a] || new Map()).forEach((credit, name) => {
+      if (!inPlan.has(name)) fut[a] += credit;
+    });
+  });
+
+  return GRADUATION_MIN_CREDITS.map((rule) => {
+    const [a, b] = rule.areas;
+    const met = rule.options.some(([x, y]) => have[a] >= x && have[b] >= y);
+    const possible = met || rule.options.some(([x, y]) => have[a] + fut[a] >= x && have[b] + fut[b] >= y);
+    const best = rule.options
+      .map(([x, y]) => ({ x, y, short: Math.max(0, x - have[a]) + Math.max(0, y - have[b]) }))
+      .sort((p, q) => p.short - q.short)[0];
+    return { rule, have: [have[a], have[b]], status: met ? "met" : possible ? "ok" : "impossible", best };
+  });
+}
+
+// 이번 학기에 영역별로 최소 몇 학점은 담아야 졸업 기준을 따라갈 수 있는지 계산한다.
+//  - 앞으로 학기들을 다 합쳐도 모자라는 만큼은 이번 학기에 반드시 채우고(mustNow),
+//  - 그 외에는 남은 학기에 고르게 나눠 담는 속도(남은 학점 ÷ 남은 학기 수)를 맞춘다.
+function gradTargetsThisTerm(ctx) {
+  const need = {};
+  GRADUATION_MIN_CREDITS.forEach((rule) => {
+    const [a, b] = rule.areas;
+    const ea = ctx.earned[a] || 0;
+    const eb = ctx.earned[b] || 0;
+    const best = rule.options
+      .map(([x, y]) => ({ x, y, short: Math.max(0, x - ea) + Math.max(0, y - eb) }))
+      .sort((p, q) => p.short - q.short)[0];
+    [[a, best.x, ea], [b, best.y, eb]].forEach(([area, target, have]) => {
+      const remaining = Math.max(0, target - have);
+      let futureTotal = 0;
+      (ctx.future[area] || new Map()).forEach((credit) => (futureTotal += credit));
+      const mustNow = Math.max(0, remaining - futureTotal);
+      need[area] = Math.max(mustNow, Math.floor(remaining / ctx.termsLeft));
+    });
+  });
+  return need;
+}
 
 // 관심분야/비선호/AP 선호/선이수 과목을 반영해 학년·학기에 맞는 시간표 한 안을 구성한다.
 // completed: 이전 학기에 이미 들은 과목명 Set (Ⅱ과목·실험과목의 선이수 조건 확인용)
 // hourCap: 주당 시수 상한(학기별 27학점 이내 권장 기준).
-// balanceMode: true면 졸업 기준에 들어가는 4개 영역(과학/정보과학/수학/AI융합) 중
-//   이번 학기에 들을 수 있는 과목이 하나라도 있는 영역은 먼저 1개씩 담아 놓고 나머지를 채운다.
-//   이렇게 만든 안이 졸업 기준과 어긋나면(담을 수 있었는데 안 담았으면) 그 안은 폐기 대상이 된다.
-function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, hourCap, balanceMode) {
+// balanceMode: true면 졸업 기준(gradTargetsThisTerm)에서 요구하는 학점을 영역별로 먼저 채운 뒤 나머지를 관심 순으로 채운다.
+function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, hourCap, balanceMode, gradCtx) {
   // 이미 들은 과목(이름 기준이라 다른 학기에 같은 과목이 열려도 함께 제외)과
   // 이번 학기에 폐강된 과목은 필수·택N·자유선택 구분 없이 후보에서 아예 뺀다.
   // 단, 들은 과목은 아래 isEligible에서 선이수 조건을 충족한 것으로 계속 인정한다.
@@ -139,7 +233,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
       disliked,
       alreadyTaken,
       score:
-        interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred && s.ap ? 1 : 0) + ratingBonus(s.name),
+        interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred === true && s.ap ? 1 : 0) - (apPreferred === "avoid" && s.ap ? 1.5 : 0) + ratingBonus(s.name),
     };
   });
 
@@ -175,7 +269,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
       .forEach(add);
   });
 
-  // 3) 자유 선택 풀(과학/정보과학/수학/AI융합): 점수 높은 순으로 상한까지 채운다.
+  // 3) 자유 선택 풀(과학/정보과학/수학/AI융합/과학정보수학/AI융합(심화)): 점수 높은 순으로 상한까지 채운다.
   // Ⅱ과목·실험과목은 "선이수 과목이 이미 완료되었거나 이번 학기에 함께 선택될 때만" 담을 수 있어서,
   // 전체 목록을 여러 번 훑으며(한 번 돌 때마다 새로 조건이 풀리는 과목이 없을 때까지) 채운다.
   const freePool = scored.filter((s) => !s.mandatory && !s.group && !s.alreadyTaken && !s.disliked);
@@ -195,13 +289,23 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
     }
   }
 
-  if (balanceMode) {
-    // 영역별로 가장 시수가 적은(=담기 쉬운) 과목을 먼저 하나씩 확보해 편중을 막는다.
-    MAJOR_AREAS.forEach((area) => {
-      const cheapest = freePool
-        .filter((s) => s.area === area)
-        .sort((a, b) => a.hours - b.hours || b.score - a.score)[0];
-      if (cheapest) fillLoop([cheapest]);
+  if (balanceMode && gradCtx) {
+    // 졸업 기준에서 이번 학기에 필요한 영역별 학점을, 점수가 높은 과목부터 한 과목씩 담아 채운다.
+    const need = gradTargetsThisTerm(gradCtx);
+    GRAD_AREAS.forEach((area) => {
+      let got = 0;
+      let progressed = true;
+      while (got < (need[area] || 0) && progressed) {
+        progressed = false;
+        const next = freePoolByScore.find(
+          (s) => s.area === area && !pickedNames.has(s.name) && isEligible(s) && totalHours + s.hours <= hourCap
+        );
+        if (next) {
+          add(next);
+          got += next.credit;
+          progressed = true;
+        }
+      }
     });
   }
 
@@ -213,11 +317,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
     areaCredits[s.area] = (areaCredits[s.area] || 0) + s.credit;
   });
 
-  // 이 학기에 자리가 있었는데도 0학점으로 남은 전공 영역을 찾는다(= 졸업 기준 위반 후보).
-  const violations = MAJOR_AREAS.filter((area) => {
-    if (areaCredits[area] > 0) return false;
-    return freePool.some((s) => s.area === area && isEligible(s) && s.hours <= hourCap);
-  });
+  const grad = gradCtx ? gradProgress(picked, gradCtx) : [];
 
   return {
     subjects: picked,
@@ -225,46 +325,51 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
     totalCredits,
     freeHours: 36 - totalHours,
     areaCredits,
-    violations,
+    grad,
+    infeasible: grad.some((g) => g.status === "impossible"),
   };
 }
 
-// 여러 후보 시간표를 만들어 졸업 기준 위반이 없는 안만 골라낸다.
-// 위반이 있는 안은 폐기하고, 남는 자리가 부족하면 균형 모드로 다시 만든 안으로 채운다.
+// 여러 후보 시간표를 만들어, 졸업 기준을 채울 수 없게 되는 안은 버리고 남은 안 중에서 고른다.
+// 만족하는 안이 하나도 없으면 "불가능한 묶음이 가장 적은 안"을 경고와 함께 보여준다.
 function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled) {
+  const gradCtx = gradContext(grade, term, completed);
   const attempts = [
     { label: "균형 잡힌 시간표", hourCap: 27, balanceMode: true },
     { label: "관심 집중형 시간표", hourCap: 27, balanceMode: false },
-    { label: "여유로운 시간표", hourCap: 23, balanceMode: true },
-    { label: "여유로운 시간표", hourCap: 20, balanceMode: true },
+    { label: "여유로운 시간표", hourCap: 24, balanceMode: true },
+    { label: "여유로운 시간표", hourCap: 21, balanceMode: true },
   ];
+  // AP 과목(주당 시수가 1 더 듦)을 원하지 않는 사용자에게는 AP 부담을 줄인 안도 후보에 넣는다.
+  if (apPreferred !== true) {
+    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 27, balanceMode: true, ap: "avoid" });
+    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 24, balanceMode: true, ap: "avoid" });
+  }
 
   const candidates = attempts.map((a) => ({
     ...a,
-    plan: buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, a.hourCap, a.balanceMode),
+    plan: buildPlan(grade, term, interests, dislikeTerms, a.ap || apPreferred, completed, cancelled, a.hourCap, a.balanceMode, gradCtx),
   }));
+  const keyOf = (c) => c.plan.subjects.map((s) => s.name).sort().join("|");
 
   const seen = new Set();
   const accepted = [];
   for (const c of candidates) {
-    const key = c.plan.subjects.map((s) => s.name).sort().join("|");
-    if (seen.has(key)) continue;
-    if (c.plan.violations.length > 0) continue; // 졸업 기준을 어기는 안은 폐기
-    seen.add(key);
+    if (seen.has(keyOf(c))) continue;
+    if (c.plan.infeasible) continue; // 졸업 기준을 채울 수 없게 되는 안은 폐기
+    seen.add(keyOf(c));
     accepted.push(c);
     if (accepted.length === 2) break;
   }
 
-  // 위반 없는 안이 2개가 안 모이면(관심분야가 특정 영역에 너무 쏠려 있는 등),
-  // 위반이 가장 적은 안이라도 골라서 채우고 왜 남았는지 알 수 있게 violations를 그대로 들고 있는다.
-  if (accepted.length < 2) {
-    const rest = candidates
-      .filter((c) => !seen.has(c.plan.subjects.map((s) => s.name).sort().join("|")))
-      .sort((a, b) => a.plan.violations.length - b.plan.violations.length);
+  // 기준을 만족하는 안이 하나라도 있으면 그 안만 보여준다(미달 안으로 빈자리를 채우지 않는다).
+  // 하나도 없을 때만 "불가능한 묶음이 가장 적은 안"을 경고와 함께 보여준다.
+  if (accepted.length === 0) {
+    const impossibleCount = (c) => c.plan.grad.filter((g) => g.status === "impossible").length;
+    const rest = candidates.filter((c) => !seen.has(keyOf(c))).sort((a, b) => impossibleCount(a) - impossibleCount(b));
     for (const c of rest) {
-      const key = c.plan.subjects.map((s) => s.name).sort().join("|");
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(keyOf(c))) continue;
+      seen.add(keyOf(c));
       accepted.push(c);
       if (accepted.length === 2) break;
     }
@@ -273,16 +378,25 @@ function generatePlans(grade, term, interests, dislikeTerms, apPreferred, comple
   return accepted;
 }
 
-function renderGraduationRef() {
+// 졸업 기준 안내 카드: 기준표 + 지금까지 "들은 과목"으로 체크한 학점
+function renderGraduationRef(ctx) {
   const rows = GRADUATION_MIN_CREDITS.map((rule) => {
-    const optionsText = rule.options.map((opt) => opt.join("+")).join(" 또는 ");
+    const optionsText = rule.options.map(([x, y]) => `${rule.areas[0]} ${x} + ${rule.areas[1]} ${y}`).join(" 또는 ");
+    const [a, b] = rule.areas;
     return `
       <div class="grad-row">
         <div class="grad-row__label">${rule.label}</div>
-        <div class="grad-row__target">기준: ${optionsText}학점 (2학년1학기~3학년2학기 4개 학기 누적)</div>
+        <div class="grad-row__target">기준: ${optionsText}</div>
+        <div class="grad-row__current">지금까지: ${a} ${(ctx && ctx.earned[a]) || 0} · ${b} ${(ctx && ctx.earned[b]) || 0}학점</div>
       </div>
     `;
   }).join("");
+
+  const earnedTotal = ctx ? Object.values(ctx.earned).reduce((t, v) => t + v, 0) : 0;
+  const hint =
+    ctx && ctx.termsLeft < 4 && earnedTotal === 0
+      ? '<p class="grad-warn">⚠ 수강신청표에서 "들은 과목"을 체크하지 않아 지금까지 0학점으로 계산했어요. 체크하면 졸업 판정이 정확해져요.</p>'
+      : "";
 
   return `
     <div class="plan-card grad-card">
@@ -290,7 +404,8 @@ function renderGraduationRef() {
         <span class="plan-card__title">졸업 최소이수학점 기준</span>
       </div>
       ${rows}
-      <p class="grad-footnote">아래 추천안들은 이번 학기에 담을 수 있는 과목이 있는데도 특정 영역이 0학점으로 비지 않도록 걸러낸 안입니다.</p>
+      ${hint}
+      <p class="grad-footnote">기준은 4개 학기(2학년1학기~3학년2학기) 누적이에요. 아래 안들은 "지금까지 들은 학점 + 이번 안 + 앞으로 들을 수 있는 학점"으로 졸업이 불가능해지는 경우를 걸러낸 거예요.</p>
     </div>
   `;
 }
@@ -301,8 +416,7 @@ function renderPlan(plan, label) {
     (byArea[s.area] ||= []).push(s);
   });
 
-  const areaOrder = ["과학", "정보과학", "수학", "AI융합", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
-  const areaHtml = areaOrder
+  const areaHtml = AREA_ORDER
     .filter((area) => byArea[area])
     .map((area) => {
       const subjectsHtml = byArea[area]
@@ -316,8 +430,17 @@ function renderPlan(plan, label) {
     })
     .join("");
 
-  const violationHtml = plan.violations.length
-    ? `<div class="grad-warn">⚠ ${plan.violations.join(", ")} 학점을 이번 학기에 하나도 못 담았어요 (선택 가능한 과목이 전부 비선호이거나 선이수 조건 때문일 수 있어요).</div>`
+  const statusText = { met: "충족 ✓", ok: "진행 중", impossible: "불가능 ⚠" };
+  const violationHtml = plan.grad.length
+    ? `<div class="grad-lines">${plan.grad
+        .map((g) => {
+          const [a, b] = g.rule.areas;
+          const more = g.status === "ok" ? ` · 가장 가까운 기준까지 ${g.best.short}학점 남음` : "";
+          return `<div class="grad-line is-${g.status}"><span class="grad-line__name">${g.rule.label}</span>
+            <span class="grad-line__num">${a} ${g.have[0]} · ${b} ${g.have[1]}${more}</span>
+            <span class="grad-chip">${statusText[g.status]}</span></div>`;
+        })
+        .join("")}</div>`
     : "";
 
   // 안 전체 평균 별점: 별점이 있는 과목들의 평균만 계산한다(없으면 "-").
@@ -330,7 +453,7 @@ function renderPlan(plan, label) {
     <div class="plan-card">
       <div class="plan-card__header">
         <span class="plan-card__title">${label}</span>
-        <span class="plan-card__badge">추천안</span>
+        <span class="plan-card__badge${plan.infeasible ? " is-bad" : ""}">${plan.infeasible ? "졸업 기준 미달" : "추천안"}</span>
       </div>
       <div class="plan-stats">
         <div class="plan-stat"><strong>${plan.totalCredits}</strong><span>이수학점</span></div>
@@ -508,7 +631,7 @@ const cancelKey = (grade, term, name) => `${grade}-${term}|${name}`;
 function renderCatalog() {
   const { grade: selGrade, term: selTerm } = selectedGradeTerm();
   const selIdx = termIndex(selGrade, selTerm);
-  const areaOrder = ["과학", "정보과학", "수학", "AI융합", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
+  const areaOrder = AREA_ORDER;
   let html = "";
 
   for (const [g, t] of [[2, 1], [2, 2], [3, 1], [3, 2]]) {
@@ -612,7 +735,7 @@ submitBtn.addEventListener("click", () => {
     const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled);
 
     resultContent.innerHTML =
-      renderGraduationRef() +
+      renderGraduationRef(gradContext(grade, term, completed)) +
       plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`)).join("");
 
     showScreen("result");
@@ -679,7 +802,6 @@ const searchInput = document.getElementById("search-input");
 const searchArea = document.getElementById("search-area");
 const searchResults = document.getElementById("search-results");
 const searchStatus = document.getElementById("search-status");
-const AREA_ORDER = ["과학", "정보과학", "수학", "AI융합", "사회", "국어", "영어", "제2외국어", "체육", "예술교양"];
 
 function renderSearch() {
   const q = normalizeName(searchInput.value.trim());

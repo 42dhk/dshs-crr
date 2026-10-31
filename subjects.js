@@ -5,9 +5,10 @@
 // mandatory:false, group:null 인 과목(과학/정보과학/수학/AI융합 대부분)은
 // 학생이 자유롭게 고르는 "선택 풀"로, 추천 알고리즘이 여기서 조합을 고릅니다.
 //
+// 영역(area): 과학/정보과학/수학/AI융합 = 전문기본선택, 과학정보수학/AI융합(심화) = 전문심화선택(3학년), 나머지는 교양 영역입니다.
+//
 // 사진 해상도 때문에 특히 아래 구간은 다시 한 번 확인해 주세요:
 // - 영어 3학년 1학기/2학기의 택1·택2 구성
-// - 정보과학/수학 3학년 과목 배치("고급프로그래밍/고급알고리즘"을 정보과학으로 분류했습니다)
 
 let _id = 0;
 function subject(name, credit, opts = {}) {
@@ -28,13 +29,14 @@ function subject(name, credit, opts = {}) {
   };
 }
 
-// 수강신청서 하단의 "이수학점" 표를 옮긴 참고용 졸업 최소이수학점 기준입니다.
-// 4개 학기(2-1~3-2) 누적 기준이라 이 프로그램(학기 1개씩 추천)만으로는 완전히
-// 검증할 수 없어서, 결과 화면에는 참고 지표로만 보여줍니다.
+// 수강신청서 하단 "이수학점" 표(굵은 상자 묶음)를 옮긴 졸업 최소이수학점 기준입니다. 2학년1학기~3학년2학기 4개 학기 누적 기준이고,
+// options의 각 항목 [x, y]는 "첫째 영역 x학점 이상 AND 둘째 영역 y학점 이상" 중 하나를 채우면 된다는 뜻입니다(표의 19[15]/3[7] → (19,3) 또는 (15,7)).
+//  - 전문기본선택: 과학(황토색) + 정보과학(보라색), 수학(하늘색) + AI융합(분홍색)
+//  - 전문심화선택: 과학정보수학(3학년 세미나·토픽·대수학·고급프로그래밍·고급알고리즘) + AI융합(심화)(3학년 1학기 AI융합)
 const GRADUATION_MIN_CREDITS = [
-  { label: "과학 + 정보과학", areas: ["과학", "정보과학"], options: [[19, 3], [15, 7]] },
-  { label: "수학 + AI융합", areas: ["수학", "AI융합"], options: [[12, 6], [9, 9]] },
-  { label: "과학·정보과학·수학 + AI융합(심화)", areas: ["과학", "정보과학", "수학", "AI융합"], groupFirst: 3, options: [[12, 2], [10, 4]] },
+  { label: "과학 + 정보과학", tier: "기본", areas: ["과학", "정보과학"], options: [[19, 3], [15, 7]] },
+  { label: "수학 + AI융합", tier: "기본", areas: ["수학", "AI융합"], options: [[12, 6], [9, 9]] },
+  { label: "심화: 과학정보수학 + AI융합", tier: "심화", areas: ["과학정보수학", "AI융합(심화)"], options: [[12, 2], [10, 4]] },
 ];
 
 const GROUP_PICK = {
@@ -47,63 +49,63 @@ const GROUP_PICK = {
 
 const SUBJECTS = [
   // ── 과학 ──────────────────────────────
-  subject("일반물리학Ⅰ", 3, { area: "과학", grade: 2, term: 1 }),
-  subject("일반물리학실험Ⅰ", 1, { area: "과학", grade: 2, term: 1, requires: "일반물리학Ⅰ" }),
-  subject("일반화학Ⅰ", 3, { area: "과학", grade: 2, term: 1 }),
-  subject("일반화학실험Ⅰ", 1, { area: "과학", grade: 2, term: 1, ap: true, requires: "일반화학Ⅰ" }),
-  subject("일반생물학", 3, { area: "과학", grade: 2, term: 1 }),
+  subject("일반물리학Ⅰ", 3, { area: "과학", ap: true, grade: 2, term: 1 }),
+  subject("일반물리학실험Ⅰ", 1, { area: "과학", ap: true, grade: 2, term: 1, requires: "일반물리학Ⅰ" }),
+  subject("일반화학Ⅰ", 3, { area: "과학", ap: true, grade: 2, term: 1 }),
+  subject("일반화학실험Ⅰ", 1, { area: "과학", ap: true, grade: 2, term: 1, requires: "일반화학Ⅰ" }),
+  subject("일반생물학", 3, { area: "과학", ap: true, grade: 2, term: 1 }),
   subject("일반지구과학", 3, { area: "과학", grade: 2, term: 1 }),
 
-  subject("일반물리학Ⅰ", 3, { area: "과학", grade: 2, term: 2 }),
-  subject("일반물리학실험Ⅰ", 1, { area: "과학", grade: 2, term: 2, requires: "일반물리학Ⅰ" }),
-  subject("일반화학Ⅰ", 3, { area: "과학", grade: 2, term: 2 }),
-  subject("일반화학실험Ⅰ", 1, { area: "과학", grade: 2, term: 2, ap: true, requires: "일반화학Ⅰ" }),
-  subject("일반생물학", 3, { area: "과학", grade: 2, term: 2 }),
+  subject("일반물리학Ⅰ", 3, { area: "과학", ap: true, grade: 2, term: 2 }),
+  subject("일반물리학실험Ⅰ", 1, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반물리학Ⅰ" }),
+  subject("일반화학Ⅰ", 3, { area: "과학", ap: true, grade: 2, term: 2 }),
+  subject("일반화학실험Ⅰ", 1, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반화학Ⅰ" }),
+  subject("일반생물학", 3, { area: "과학", ap: true, grade: 2, term: 2 }),
   subject("일반생물학실험", 1, { area: "과학", grade: 2, term: 2 }),
   subject("일반지구과학", 3, { area: "과학", grade: 2, term: 2 }),
   subject("일반지구과학실험", 1, { area: "과학", grade: 2, term: 2 }),
-  subject("일반물리학Ⅱ", 3, { area: "과학", grade: 2, term: 2, requires: "일반물리학Ⅰ" }),
-  subject("일반물리학실험Ⅱ", 1, { area: "과학", grade: 2, term: 2, requires: "일반물리학Ⅱ" }),
-  subject("일반화학Ⅱ", 3, { area: "과학", grade: 2, term: 2, requires: "일반화학Ⅰ" }),
-  subject("일반화학실험Ⅱ", 1, { area: "과학", grade: 2, term: 2, requires: "일반화학Ⅱ" }),
+  subject("일반물리학Ⅱ", 3, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반물리학Ⅰ" }),
+  subject("일반물리학실험Ⅱ", 1, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반물리학Ⅱ" }),
+  subject("일반화학Ⅱ", 3, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반화학Ⅰ" }),
+  subject("일반화학실험Ⅱ", 1, { area: "과학", ap: true, grade: 2, term: 2, requires: "일반화학Ⅱ" }),
 
-  subject("일반물리학Ⅱ", 3, { area: "과학", grade: 3, term: 1, requires: "일반물리학Ⅰ" }),
-  subject("일반물리학실험Ⅱ", 1, { area: "과학", grade: 3, term: 1, requires: "일반물리학Ⅱ" }),
-  subject("일반화학Ⅱ", 3, { area: "과학", grade: 3, term: 1, requires: "일반화학Ⅰ" }),
-  subject("일반화학실험Ⅱ", 1, { area: "과학", grade: 3, term: 1, ap: true, requires: "일반화학Ⅱ" }),
+  subject("일반물리학Ⅱ", 3, { area: "과학", ap: true, grade: 3, term: 1, requires: "일반물리학Ⅰ" }),
+  subject("일반물리학실험Ⅱ", 1, { area: "과학", ap: true, grade: 3, term: 1, requires: "일반물리학Ⅱ" }),
+  subject("일반화학Ⅱ", 3, { area: "과학", ap: true, grade: 3, term: 1, requires: "일반화학Ⅰ" }),
+  subject("일반화학실험Ⅱ", 1, { area: "과학", ap: true, grade: 3, term: 1, requires: "일반화학Ⅱ" }),
   subject("심화생명과학", 3, { area: "과학", grade: 3, term: 1 }),
   subject("심화생명과학실험", 1, { area: "과학", grade: 3, term: 1 }),
   subject("심화지구과학", 3, { area: "과학", grade: 3, term: 1 }),
-  subject("물리학토픽Ⅰ", 2, { area: "과학", grade: 3, term: 1 }),
-  subject("화학토픽Ⅰ", 2, { area: "과학", grade: 3, term: 1 }),
-  subject("생명과학세미나Ⅰ", 2, { area: "과학", grade: 3, term: 1 }),
-  subject("지구과학토픽Ⅰ", 2, { area: "과학", grade: 3, term: 1 }),
+  subject("물리학토픽Ⅰ", 2, { area: "과학정보수학", grade: 3, term: 1 }),
+  subject("화학토픽Ⅰ", 2, { area: "과학정보수학", grade: 3, term: 1 }),
+  subject("생명과학세미나Ⅰ", 2, { area: "과학정보수학", grade: 3, term: 1 }),
+  subject("지구과학토픽Ⅰ", 2, { area: "과학정보수학", grade: 3, term: 1 }),
 
-  subject("대수학", 2, { area: "과학", grade: 3, term: 2 }),
-  subject("물리학토픽Ⅱ", 2, { area: "과학", grade: 3, term: 2 }),
-  subject("화학토픽Ⅱ", 2, { area: "과학", grade: 3, term: 2 }),
-  subject("생명과학세미나Ⅱ", 2, { area: "과학", grade: 3, term: 2 }),
-  subject("지구과학토픽Ⅱ", 2, { area: "과학", grade: 3, term: 2 }),
+  subject("대수학", 2, { area: "과학정보수학", grade: 3, term: 2 }),
+  subject("물리학토픽Ⅱ", 2, { area: "과학정보수학", grade: 3, term: 2 }),
+  subject("화학토픽Ⅱ", 2, { area: "과학정보수학", grade: 3, term: 2 }),
+  subject("생명과학세미나Ⅱ", 2, { area: "과학정보수학", grade: 3, term: 2 }),
+  subject("지구과학토픽Ⅱ", 2, { area: "과학정보수학", grade: 3, term: 2 }),
 
   // ── 정보과학 ──────────────────────────
   subject("객체지향프로그래밍", 3, { area: "정보과학", grade: 2, term: 1 }),
   subject("인공지능", 3, { area: "정보과학", grade: 2, term: 1 }),
-  subject("자료구조와알고리즘", 3, { area: "정보과학", grade: 2, term: 2, ap: true }),
+  subject("자료구조와알고리즘", 3, { area: "정보과학", ap: true, grade: 2, term: 2 }),
   subject("정보과학프로젝트", 1, { area: "정보과학", grade: 2, term: 2 }),
-  subject("고급프로그래밍", 2, { area: "정보과학", grade: 3, term: 1 }),
-  subject("고급알고리즘", 2, { area: "정보과학", grade: 3, term: 2 }),
+  subject("고급프로그래밍", 2, { area: "과학정보수학", grade: 3, term: 1 }),
+  subject("고급알고리즘", 2, { area: "과학정보수학", grade: 3, term: 2 }),
 
   // ── 수학 ──────────────────────────────
-  subject("미적분학Ⅰ", 3, { area: "수학", grade: 2, term: 1, ap: true }),
+  subject("미적분학Ⅰ", 3, { area: "수학", ap: true, grade: 2, term: 1 }),
   subject("고급수학", 3, { area: "수학", grade: 2, term: 1 }),
-  subject("미적분학Ⅰ", 3, { area: "수학", grade: 2, term: 2 }),
+  subject("미적분학Ⅰ", 3, { area: "수학", ap: true, grade: 2, term: 2 }),
   subject("응용수학", 3, { area: "수학", grade: 2, term: 2 }),
-  subject("미적분학Ⅱ", 3, { area: "수학", grade: 2, term: 2, ap: true, requires: "미적분학Ⅰ" }),
-  subject("선형대수학", 3, { area: "수학", grade: 2, term: 2, ap: true }),
-  subject("미적분학Ⅱ", 3, { area: "수학", grade: 3, term: 1, ap: true, requires: "미적분학Ⅰ" }),
-  subject("선형대수학", 3, { area: "수학", grade: 3, term: 1, ap: true }),
-  subject("수학세미나Ⅰ", 2, { area: "수학", grade: 3, term: 1 }),
-  subject("수학세미나Ⅱ", 2, { area: "수학", grade: 3, term: 2 }),
+  subject("미적분학Ⅱ", 3, { area: "수학", ap: true, grade: 2, term: 2, requires: "미적분학Ⅰ" }),
+  subject("선형대수학", 3, { area: "수학", ap: true, grade: 2, term: 2 }),
+  subject("미적분학Ⅱ", 3, { area: "수학", ap: true, grade: 3, term: 1, requires: "미적분학Ⅰ" }),
+  subject("선형대수학", 3, { area: "수학", ap: true, grade: 3, term: 1 }),
+  subject("수학세미나Ⅰ", 2, { area: "과학정보수학", grade: 3, term: 1 }),
+  subject("수학세미나Ⅱ", 2, { area: "과학정보수학", grade: 3, term: 2 }),
 
   // ── AI융합 ────────────────────────────
   subject("융합수학", 3, { area: "AI융합", grade: 2, term: 1 }),
@@ -112,11 +114,11 @@ const SUBJECTS = [
   subject("컴퓨터물리해석", 3, { area: "AI융합", grade: 2, term: 2 }),
   subject("AI와바이오테크놀로지", 3, { area: "AI융합", grade: 2, term: 2 }),
   subject("인공지능기반정보과학탐구", 3, { area: "AI융합", grade: 2, term: 2 }),
-  subject("물리학과첨단기술", 2, { area: "AI융합", grade: 3, term: 1 }),
-  subject("첨단화학", 2, { area: "AI융합", grade: 3, term: 1 }),
-  subject("AI와디지털생물학", 2, { area: "AI융합", grade: 3, term: 1 }),
-  subject("가상현실(VR)과과학콘텐츠", 2, { area: "AI융합", grade: 3, term: 1 }),
-  subject("인공지능융합연구", 2, { area: "AI융합", grade: 3, term: 1 }),
+  subject("물리학과첨단기술", 2, { area: "AI융합(심화)", grade: 3, term: 1 }),
+  subject("첨단화학", 2, { area: "AI융합(심화)", grade: 3, term: 1 }),
+  subject("AI와디지털생물학", 2, { area: "AI융합(심화)", grade: 3, term: 1 }),
+  subject("가상현실(VR)과과학콘텐츠", 2, { area: "AI융합(심화)", grade: 3, term: 1 }),
+  subject("인공지능융합연구", 2, { area: "AI융합(심화)", grade: 3, term: 1 }),
 
   // ── 사회 ──────────────────────────────
   subject("생활속정치와법", 2, { area: "사회", grade: 2, term: 1, mandatory: true }),
