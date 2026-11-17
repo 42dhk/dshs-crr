@@ -2145,3 +2145,139 @@ body:has(.lightbox:not([hidden])) .side-handle,
 body:has(.lightbox:not([hidden])) .edge-zone {
   display: none;
 }
+
+/* ── 홈 버튼 / 작성 중인 내용 카드 / 알림 ── */
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--primary-dark);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.home-btn:hover {
+  background: var(--primary-light);
+  transform: translateY(-1px);
+}
+
+.resume-card {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 14px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1.5px solid #f6cdb4;
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.resume-card__title {
+  font-size: 0.86rem;
+  font-weight: 900;
+  color: var(--primary-dark);
+}
+
+.resume-card__step {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.resume-card__meta {
+  margin: 2px 0 10px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.resume-card__btns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resume-card__btns .btn {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 0.88rem;
+}
+
+.btn.is-armed {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.resume-card.is-nudge {
+  animation: resume-nudge 0.6s ease;
+}
+
+@keyframes resume-nudge {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.side-actions {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.side-actions .btn-soft {
+  width: 100%;
+}
+
+.btn-soft.is-armed {
+  color: #fff;
+  background: var(--danger);
+}
+
+.side-actions__hint {
+  margin: 8px 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 45;
+  width: max-content;
+  max-width: calc(100% - 40px);
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(46, 42, 56, 0.92);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.toast.is-show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}

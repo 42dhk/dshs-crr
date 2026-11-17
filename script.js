@@ -540,6 +540,10 @@ function showScreen(name) {
 
 // 화면1 -> 화면2(수강신청표 업로드)
 document.getElementById("btn-start").addEventListener("click", () => {
+  if (pendingResume) {
+    nudgeResume();
+    return;
+  }
   showScreen("upload");
 });
 
@@ -775,9 +779,11 @@ renderCatalog();
 const resultContent = document.getElementById("result-content");
 const resultPlaceholderHtml = resultContent.innerHTML;
 
-submitBtn.addEventListener("click", () => {
-  if (submitBtn.disabled) return;
+let runId = 0; // 홈으로 나가거나 다시 시작하면 값을 올려서, 계산 중이던 추천이 나중에 화면을 덮어쓰지 못하게 한다
+
+function runRecommendation() {
   showScreen("loading");
+  const myRun = ++runId;
 
   const { grade, term } = selectedGradeTerm();
   const interests = Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag);
@@ -797,6 +803,7 @@ submitBtn.addEventListener("click", () => {
 
   // 실제 계산은 짧게 지연시켜 로딩 화면이 보이도록 한다.
   Promise.all([subjectsReady, ratingsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
+    if (myRun !== runId) return; // 그 사이에 홈으로 나갔거나 다시 시작했다면 결과를 띄우지 않는다
     // 여러 안을 만들어보고 졸업 기준(담을 수 있었는데 0학점인 영역)을 어기는 안은 버린 뒤,
     // 기준을 통과한 안 중에서 최종 2개를 고른다.
     const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, { must, never });
@@ -807,30 +814,11 @@ submitBtn.addEventListener("click", () => {
 
     showScreen("result");
   });
-});
+}
 
-// 화면5 -> 화면1 (처음으로, 입력값 초기화)
-document.getElementById("btn-restart").addEventListener("click", () => {
-  document.querySelectorAll(".chip.selected").forEach((chip) => {
-    chip.classList.remove("selected");
-  });
-  apToggle.classList.remove("on");
-  apToggle.setAttribute("aria-checked", "false");
-  dislikes.clear();
-  dislikeList.innerHTML = "";
-  takenNames.clear();
-  cancelledKeys.clear();
-  mustKeys.clear();
-  neverNames.clear();
-  resetCatalogToBase();
-  rvTerm = "2-1";
-  renderCatalog();
-  photos.length = 0;
-  renderPhotoGrid();
-  updateUploadState();
-  resultContent.innerHTML = resultPlaceholderHtml;
-  updateSubmitState();
-  showScreen("start");
+submitBtn.addEventListener("click", () => {
+  if (submitBtn.disabled) return;
+  runRecommendation();
 });
 
 updateSubmitState();
@@ -1770,3 +1758,378 @@ document.addEventListener("keydown", (e) => {
   closeEditor();
   closeLightbox();
 });
+
+// ── 홈 버튼 · 진행 상황 저장 · 이어서 하기 / 다시 시작하기 ─────────────────
+// 입력하는 동안 진행 상황을 브라우저에 저장해 두고(사진은 용량이 커서 IndexedDB에), 홈 버튼으로 첫 화면에 갔다가
+// "이어서 하기"로 그 자리에서 다시 시작할 수 있게 한다. "다시 시작하기"는 저장된 내용까지 모두 지운다.
+const PROGRESS_KEY = "dshs_progress_v1";
+const PHOTO_DB = "dshs_crr";
+let lastSavedPhotoSig = "";
+let pendingResume = false; // 저장된 작업이 있는데 아직 이어서/다시 시작을 고르지 않은 상태(이때는 새 입력으로 덮어쓰지 않는다)
+
+const STEP_LABELS = {
+  upload: "① 사진 업로드",
+  review: "② 수강신청표 확인",
+  input: "③ 정보 입력",
+  result: "④ 추천 결과",
+  write: "후기 남기기",
+  reviews: "후기 열람",
+};
+
+function currentScreenName() {
+  return document.querySelector(".screen.active").id.replace("screen-", "");
+}
+
+// 사진 저장(IndexedDB). 사파리 사생활 보호 모드 등에서 막혀 있으면 조용히 건너뛴다.
+function openPhotoDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbRun(mode, fn) {
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", mode);
+    const req = fn(tx.objectStore("kv"));
+    tx.oncomplete = () => resolve(req && req.result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+const idbSet = (k, v) => idbRun("readwrite", (s) => s.put(v, k));
+const idbGet = (k) => idbRun("readonly", (s) => s.get(k));
+const idbDel = (k) => idbRun("readwrite", (s) => s.delete(k));
+
+const photoSig = () => photos.map((p) => `${p.id}:${p.dataUrl.length}`).join("|");
+
+function collectSnapshot(screen) {
+  const draft = {
+    search: writeSearch.value,
+    selected: writeSelected,
+    rating: writeRating,
+    teacher: document.getElementById("write-teacher").value,
+    comment: document.getElementById("write-comment").value,
+  };
+  const hasDraft = !!draft.selected; // 후기는 과목을 고른 뒤에만 "작성 중"으로 본다
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    screen,
+    grade: document.getElementById("select-grade").value,
+    term: document.getElementById("select-term").value,
+    interests: Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag),
+    dislikes: Array.from(dislikes),
+    ap: apToggle.classList.contains("on"),
+    taken: [...takenNames],
+    cancelled: [...cancelledKeys],
+    must: [...mustKeys],
+    never: [...neverNames],
+    rvTerm,
+    catalog: catalogEditCount() > 0 ? { items: subjectData, deleted: catalogDeleted } : null,
+    photoCount: photos.length,
+    write: hasDraft ? draft : null,
+    filters: { q: reviewsSearch.value, teacher: reviewsTeacher.value, area: reviewsArea.value },
+  };
+}
+
+// "작성 중인 내용"이라고 부를 만한 게 있는지(아무것도 안 한 채 화면만 둘러본 경우는 저장하지 않는다)
+function hasProgress(s) {
+  return !!(
+    s.photoCount || s.interests.length || s.dislikes.length || s.ap || s.taken.length || s.cancelled.length ||
+    s.must.length || s.never.length || s.catalog || (s.write && (s.write.selected || s.write.comment || s.write.teacher)) ||
+    s.screen === "input" || s.screen === "result"
+  );
+}
+
+function readSnapshot() {
+  try {
+    const s = JSON.parse(localStorage.getItem(PROGRESS_KEY) || "null");
+    return s && s.v === 1 && STEP_LABELS[s.screen] ? s : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 진행 상황 저장. 저장했으면 true.
+function saveProgress(screen) {
+  if (screen === "start" || pendingResume) return false;
+  const snap = collectSnapshot(screen === "loading" ? "input" : screen);
+  if (!hasProgress(snap)) return false;
+  try {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(snap));
+  } catch (e) {
+    console.warn("진행 상황을 저장하지 못했어요:", e);
+    return false;
+  }
+  const sig = photoSig();
+  if (sig !== lastSavedPhotoSig) {
+    lastSavedPhotoSig = sig;
+    (photos.length ? idbSet("photos", photos.map((p) => ({ id: p.id, dataUrl: p.dataUrl }))) : idbDel("photos")).catch((e) =>
+      console.warn("사진을 저장하지 못했어요:", e)
+    );
+  }
+  return true;
+}
+
+function clearProgress() {
+  try {
+    localStorage.removeItem(PROGRESS_KEY);
+  } catch (e) {
+    /* 저장소가 막힌 브라우저 */
+  }
+  idbDel("photos").catch(() => {});
+  lastSavedPhotoSig = photoSig();
+}
+
+// 입력값을 전부 처음 상태로 되돌린다(화면 이동은 하지 않는다).
+function resetAllInputs() {
+  document.querySelectorAll(".chip.selected").forEach((chip) => chip.classList.remove("selected"));
+  apToggle.classList.remove("on");
+  apToggle.setAttribute("aria-checked", "false");
+  dislikes.clear();
+  dislikeList.innerHTML = "";
+  dislikeInput.value = "";
+  takenNames.clear();
+  cancelledKeys.clear();
+  mustKeys.clear();
+  neverNames.clear();
+  resetCatalogToBase();
+  rvTerm = "2-1";
+  document.getElementById("select-grade").selectedIndex = 0;
+  document.getElementById("select-term").selectedIndex = 0;
+  photos.length = 0;
+  renderPhotoGrid();
+  updateUploadState();
+  resultContent.innerHTML = resultPlaceholderHtml;
+  writeSelected = null;
+  writeRating = 0;
+  writeForm.hidden = true;
+  writeSearch.value = "";
+  document.getElementById("write-teacher").value = "";
+  document.getElementById("write-comment").value = "";
+  setWriteStars(0);
+  renderWritePick();
+  reviewsSearch.value = "";
+  reviewsTeacher.value = "";
+  reviewsArea.value = "";
+  refreshNameList();
+  renderCatalog();
+  updateSubmitState();
+  updateSummary();
+}
+
+function closeOverlays() {
+  closeEditor();
+  closeLightbox();
+  rateSheet.hidden = true;
+  closeDrawers();
+}
+
+// 알림 글(토스트)
+const toastEl = document.getElementById("toast");
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  requestAnimationFrame(() => toastEl.classList.add("is-show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove("is-show");
+    setTimeout(() => (toastEl.hidden = true), 300);
+  }, 3400);
+}
+
+// 첫 화면의 "작성 중인 내용" 카드
+const resumeCard = document.getElementById("resume-card");
+function timeAgo(ts) {
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return "방금 전";
+  if (m < 60) return `${m}분 전`;
+  if (m < 60 * 24) return `${Math.floor(m / 60)}시간 전`;
+  return `${Math.floor(m / 60 / 24)}일 전`;
+}
+function refreshResumeCard() {
+  const s = readSnapshot();
+  resumeCard.hidden = !s;
+  if (!s) return;
+  const bits = [];
+  if (s.photoCount) bits.push(`사진 ${s.photoCount}장`);
+  if (s.taken.length) bits.push(`들은 과목 ${s.taken.length}개`);
+  if (s.interests.length) bits.push(`관심 ${s.interests.slice(0, 3).join("·")}${s.interests.length > 3 ? " 외" : ""}`);
+  if (s.write && s.write.selected) bits.push(`후기 작성 중(${s.write.selected})`);
+  document.getElementById("resume-step").textContent = STEP_LABELS[s.screen];
+  document.getElementById("resume-meta").textContent = `${timeAgo(s.savedAt)} 저장${bits.length ? " · " + bits.join(" · ") : ""}`;
+}
+
+// 홈: 진행 상황을 저장하고 첫 화면으로
+function goHome() {
+  const name = currentScreenName();
+  let saved = false;
+  if (name !== "start") {
+    runId++; // 계산 중이었다면 취소해서 나중에 결과 화면이 끼어들지 않게 한다
+    saved = saveProgress(name);
+  }
+  closeOverlays();
+  showScreen("start");
+  refreshResumeCard();
+  if (saved) showToast("진행 상황을 저장했어요. '이어서 하기'로 계속할 수 있어요.");
+}
+document.querySelectorAll("[data-home]").forEach((b) => b.addEventListener("click", goHome));
+
+// 이어서 하기: 저장된 내용을 되살리고 저장했던 화면으로 간다
+async function applySnapshot(s) {
+  resetAllInputs();
+  if (s.catalog) {
+    subjectData = s.catalog.items.map(cloneSubject);
+    catalogDeleted = s.catalog.deleted || 0;
+  }
+  s.taken.forEach((n) => takenNames.add(n));
+  s.cancelled.forEach((k) => cancelledKeys.add(k));
+  s.must.forEach((k) => mustKeys.add(k));
+  s.never.forEach((n) => neverNames.add(n));
+  document.getElementById("select-grade").value = s.grade;
+  document.getElementById("select-term").value = s.term;
+  s.interests.forEach((tag) => {
+    const c = document.querySelector(`.chip[data-tag="${tag}"]`);
+    if (c) c.classList.add("selected");
+  });
+  s.dislikes.forEach((v) => {
+    dislikeInput.value = v;
+    addDislike();
+  });
+  dislikeInput.blur();
+  if (s.ap) {
+    apToggle.classList.add("on");
+    apToggle.setAttribute("aria-checked", "true");
+  }
+  rvTerm = s.rvTerm || "2-1";
+  if (s.photoCount) {
+    try {
+      const list = await idbGet("photos");
+      if (Array.isArray(list)) {
+        photos.push(...list);
+        photoSeq = Math.max(photoSeq, ...list.map((p) => Number(String(p.id).replace(/\D/g, "")) || 0));
+      }
+    } catch (e) {
+      console.warn("저장된 사진을 불러오지 못했어요:", e);
+    }
+  }
+  lastSavedPhotoSig = photoSig();
+  renderPhotoGrid();
+  updateUploadState();
+  refreshNameList();
+  renderCatalog();
+  updateSubmitState();
+  renderSearch();
+  updateSummary();
+}
+
+async function resumeProgress() {
+  const s = readSnapshot();
+  if (!s) return;
+  await subjectsReady;
+  await applySnapshot(s);
+  pendingResume = false;
+  closeOverlays();
+
+  if (s.screen === "upload") showScreen("upload");
+  else if (s.screen === "review") openReviewScreen();
+  else if (s.screen === "input") showScreen("input");
+  else if (s.screen === "result") {
+    if (document.querySelector(".chip.selected")) runRecommendation();
+    else showScreen("input");
+  } else if (s.screen === "write") {
+    openWriteScreen();
+    const d = s.write;
+    if (d) {
+      writeSearch.value = d.search || "";
+      renderWritePick();
+      if (d.selected) {
+        selectWriteSubject(d.selected);
+        if (!writeSubmit.disabled) {
+          setWriteStars(d.rating || 0);
+          document.getElementById("write-teacher").value = d.teacher || "";
+          document.getElementById("write-comment").value = d.comment || "";
+        }
+      }
+    }
+  } else if (s.screen === "reviews") {
+    const f = s.filters || {};
+    reviewsSearch.value = f.q || "";
+    reviewsTeacher.value = f.teacher || "";
+    reviewsArea.value = f.area || "";
+    openReviewsScreen();
+  }
+  showToast("저장해 둔 곳에서 이어서 시작해요.");
+}
+
+// 다시 시작하기: 입력한 내용과 저장된 진행 상황을 모두 지운다
+function restartAll() {
+  runId++;
+  resetAllInputs();
+  clearProgress();
+  pendingResume = false;
+  closeOverlays();
+  showScreen("start");
+  refreshResumeCard();
+  showToast("처음부터 다시 시작해요.");
+}
+
+// 실수로 누르지 않도록 한 번 더 눌러야 실행되는 버튼
+function armedButton(btn, idleText, armedText, onConfirm) {
+  let armed = false;
+  let timer = null;
+  const reset = () => {
+    armed = false;
+    clearTimeout(timer);
+    btn.textContent = idleText;
+    btn.classList.remove("is-armed");
+  };
+  btn.addEventListener("click", () => {
+    if (!armed) {
+      armed = true;
+      btn.textContent = armedText;
+      btn.classList.add("is-armed");
+      clearTimeout(timer);
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    reset();
+    onConfirm();
+  });
+}
+armedButton(document.getElementById("btn-restart-start"), "다시 시작하기", "정말 지울까요? 한 번 더", restartAll);
+armedButton(document.getElementById("btn-restart-all"), "처음부터 다시 시작", "입력한 내용이 모두 지워져요. 한 번 더", restartAll);
+document.getElementById("btn-resume").addEventListener("click", resumeProgress);
+
+// 저장된 작업이 있는데 고르지 않고 새로 시작하려 하면, 먼저 고르도록 알려준다.
+function nudgeResume() {
+  resumeCard.classList.remove("is-nudge");
+  void resumeCard.offsetWidth; // 애니메이션 다시 재생
+  resumeCard.classList.add("is-nudge");
+  showToast("작성 중인 내용이 있어요. '이어서 하기' 또는 '다시 시작하기'를 먼저 골라주세요.");
+}
+
+// 자동 저장: 입력이 멈춘 뒤 잠깐 있다가, 그리고 창을 닫거나 다른 탭으로 갈 때
+let autosaveTimer = null;
+function autosaveNow() {
+  clearTimeout(autosaveTimer);
+  if (!pendingResume) saveProgress(currentScreenName());
+}
+["click", "input", "change"].forEach((ev) =>
+  document.addEventListener(ev, () => {
+    if (pendingResume) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(autosaveNow, 600);
+  })
+);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") autosaveNow();
+});
+window.addEventListener("pagehide", autosaveNow);
+
+pendingResume = !!readSnapshot();
+lastSavedPhotoSig = "";
+refreshResumeCard();
