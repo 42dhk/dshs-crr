@@ -2281,3 +2281,110 @@ body:has(.lightbox:not([hidden])) .edge-zone {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* ── 후기: 내 흥미 / 관심 분야 체크란 ── */
+.interest-box {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+}
+
+.interest-flag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.interest-flag-row input {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+}
+
+.interest-box__label {
+  margin: 10px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.interest-box__label span {
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+.interest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.int-chip {
+  cursor: pointer;
+}
+
+.int-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.int-chip span {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--bg-1);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.int-chip input:checked + span {
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, #ff9a6b, var(--primary-dark));
+  border-color: transparent;
+}
+
+.int-chip input:disabled + span {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.int-chip input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.review-card__tag.is-interest {
+  color: #1f7a4a;
+  background: #dff3e8;
+}
+
+.review-card__interest {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.reviews-compare {
+  margin: 0 0 6px;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.reviews-compare:empty {
+  display: none;
+}
+
+.reviews-compare b {
+  color: #1f7a4a;
+}

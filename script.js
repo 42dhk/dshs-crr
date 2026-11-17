@@ -960,6 +960,7 @@ function renderRateList() {
             <div class="rate-item__name">${name}${avg}</div>
             <div class="rate-stars">${[1, 2, 3, 4, 5].map((v) => `<button type="button" class="star" data-v="${v}" aria-label="${v}점" ${done ? "disabled" : ""}>★</button>`).join("")}</div>
             <input class="text-input rate-teacher" list="teacher-suggest" maxlength="20" placeholder="담당 선생님 (선택)" ${done ? "disabled" : ""}>
+            ${interestBoxHtml(done)}
             <textarea class="rate-comment" maxlength="500" placeholder="한 줄 후기 (선택)" ${done ? "disabled" : ""}></textarea>
             <div class="rate-actions"><span class="rate-msg">${done ? "이미 평가했어요 ✓" : ""}</span>
               <button type="button" class="rate-submit" ${done ? "disabled" : ""}>등록</button></div>
@@ -1007,7 +1008,8 @@ rateList.addEventListener("click", async (e) => {
     name,
     rating,
     item.querySelector(".rate-comment").value.trim(),
-    item.querySelector(".rate-teacher").value
+    item.querySelector(".rate-teacher").value,
+    readInterestBox(item.querySelector(".interest-box"))
   );
 
   if (!result.ok) {
@@ -1026,22 +1028,85 @@ function cleanTeacher(str) {
     .slice(0, 20);
 }
 
+// ── 후기에 함께 남기는 "내 흥미/관심 분야" ─────────────────────────────
+// 후기를 읽는 사람이 "이 사람은 이 과목에 흥미가 있던 사람인지, 어떤 분야를 좋아하는 사람인지"를 참고할 수 있게 한다.
+const INTEREST_TAGS = ["수학", "물리", "화학", "생명과학", "정보과학", "인문사회", "예술", "체육"];
+const MY_INTERESTS_KEY = "dshs_my_interests";
+
+// 처음 후기를 쓸 때는 추천 입력에서 고른 관심분야를 미리 체크해 주고, 한 번 남긴 뒤에는 마지막으로 고른 값을 기억한다.
+function getMyInterests() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MY_INTERESTS_KEY) || "null");
+    if (Array.isArray(saved)) return saved.filter((t) => INTEREST_TAGS.includes(t));
+  } catch (e) {
+    /* 저장소가 막힌 브라우저 */
+  }
+  return Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag);
+}
+
+function saveMyInterests(list) {
+  try {
+    localStorage.setItem(MY_INTERESTS_KEY, JSON.stringify(list));
+  } catch (e) {
+    /* 저장소가 막힌 브라우저 */
+  }
+}
+
+function interestBoxHtml(disabled, checked, interested) {
+  // 이미 평가한 과목은 무엇을 골랐었는지 다시 보여줄 수 없으니(오해 방지) 체크란을 아예 숨긴다.
+  if (disabled) return "";
+  const on = checked || getMyInterests();
+  const dis = "";
+  return `<div class="interest-box">
+    <label class="interest-flag-row"><input type="checkbox" class="interest-flag" ${interested ? "checked" : ""} ${dis}> 이 과목에 원래 흥미가 있었어요</label>
+    <div class="interest-box__label">내 관심 분야 <span>후기를 읽는 사람이 참고해요</span></div>
+    <div class="interest-chips">${INTEREST_TAGS.map(
+      (t) => `<label class="int-chip"><input type="checkbox" class="interest-tag" value="${t}" ${on.includes(t) ? "checked" : ""} ${dis}><span>${t}</span></label>`
+    ).join("")}</div>
+  </div>`;
+}
+
+function readInterestBox(box) {
+  return {
+    interested: box.querySelector(".interest-flag").checked,
+    interests: [...box.querySelectorAll(".interest-tag:checked")].map((c) => c.value),
+  };
+}
+
+// DB에 아직 없는 선택 열(teacher / interested / interests)은 오류 문구에서 찾아내 빼고 다시 시도하는 데 쓴다.
+const OPTIONAL_REVIEW_COLUMNS = ["teacher", "interested", "interests"];
+function missingOptionalColumns(error, cols) {
+  const text = `${error.message || ""} ${error.details || ""}`;
+  return cols.filter((c) => new RegExp(`\\b${c}\\b`, "i").test(text));
+}
+
 // 별점 저장(공통): DB에 넣고, 성공하면 화면의 평균과 "이미 평가함" 기록을 갱신한다.
-async function saveReview(name, rating, comment, teacherInput) {
+async function saveReview(name, rating, comment, teacherInput, extra) {
   const teacher = cleanTeacher(teacherInput) || null;
-  const row = { subject_name: name, rating, comment: comment || null, teacher };
+  const interests = ((extra && extra.interests) || []).filter((t) => INTEREST_TAGS.includes(t));
+  const row = {
+    subject_name: name,
+    rating,
+    comment: comment || null,
+    teacher,
+    interested: !!(extra && extra.interested),
+    interests: interests.length ? interests.join(",") : null,
+  };
   let { error } = await supabaseClient.from("reviews").insert(row);
 
-  // DB에 teacher 열이 아직 없으면(supabase/teacher.sql 실행 전) 선생님 이름만 빼고 다시 저장한다.
-  if (error && /teacher/i.test(`${error.message} ${error.details || ""}`)) {
-    console.warn("teacher 열이 아직 없어 선생님 이름 없이 저장합니다:", error.message);
-    const { teacher: _omit, ...withoutTeacher } = row;
-    ({ error } = await supabaseClient.from("reviews").insert(withoutTeacher));
+  // DB에 새 열이 아직 없으면(supabase/teacher.sql, interest.sql 실행 전) 없는 열만 빼고 다시 저장한다.
+  for (let tries = 0; error && tries < 3; tries++) {
+    const missing = missingOptionalColumns(error, OPTIONAL_REVIEW_COLUMNS).filter((c) => c in row);
+    if (!missing.length) break;
+    console.warn(`DB에 ${missing.join(", ")} 열이 아직 없어 그 항목 없이 저장합니다:`, error.message);
+    missing.forEach((c) => delete row[c]);
+    ({ error } = await supabaseClient.from("reviews").insert(row));
   }
   if (error) {
     console.warn("별점 저장 실패:", error);
     return { ok: false, error };
   }
+  saveMyInterests(interests);
 
   // 다음 접속 때는 DB 값으로 다시 계산되지만, 지금 화면에도 바로 반영한다.
   const prev = subjectRatings[name] || { avg: 0, count: 0 };
@@ -1087,6 +1152,7 @@ const writeForm = document.getElementById("write-form");
 const writeMsg = document.getElementById("write-msg");
 const writeSubmit = document.getElementById("write-submit");
 const writeStars = document.getElementById("write-stars");
+const writeInterest = document.getElementById("write-interest");
 let writeSelected = null;
 let writeRating = 0;
 
@@ -1135,6 +1201,7 @@ function selectWriteSubject(name) {
   document.getElementById("write-comment").disabled = done;
   document.getElementById("write-teacher").value = "";
   document.getElementById("write-teacher").disabled = done;
+  writeInterest.innerHTML = interestBoxHtml(done);
   updateTeacherSuggest(name);
   writeStars.querySelectorAll(".star").forEach((s) => (s.disabled = done));
   setWriteStars(0);
@@ -1181,7 +1248,8 @@ writeSubmit.addEventListener("click", async () => {
     writeSelected,
     writeRating,
     document.getElementById("write-comment").value.trim(),
-    document.getElementById("write-teacher").value
+    document.getElementById("write-teacher").value,
+    readInterestBox(writeInterest.querySelector(".interest-box"))
   );
   if (!result.ok) {
     writeSubmit.disabled = false;
@@ -1201,6 +1269,8 @@ writeSubmit.addEventListener("click", async () => {
 const reviewsSearch = document.getElementById("reviews-search");
 const reviewsArea = document.getElementById("reviews-area");
 const reviewsTeacher = document.getElementById("reviews-teacher");
+const reviewsInterest = document.getElementById("reviews-interest");
+const reviewsCompare = document.getElementById("reviews-compare");
 const reviewsBreakdown = document.getElementById("reviews-breakdown");
 const reviewsList = document.getElementById("reviews-list");
 const reviewsSummary = document.getElementById("reviews-summary");
@@ -1213,10 +1283,14 @@ async function loadReviews() {
   const query = (cols) =>
     supabaseClient.from("reviews").select(cols).order("created_at", { ascending: false }).limit(300);
 
-  let { data, error } = await query("subject_name,rating,comment,teacher,created_at");
-  // teacher 열이 아직 없으면(supabase/teacher.sql 실행 전) 선생님 없이 읽는다.
-  if (error && /teacher/i.test(`${error.message} ${error.details || ""}`)) {
-    ({ data, error } = await query("subject_name,rating,comment,created_at"));
+  let cols = ["subject_name", "rating", "comment", "teacher", "interested", "interests", "created_at"];
+  let { data, error } = await query(cols.join(","));
+  // 새 열이 아직 없으면(teacher.sql, interest.sql 실행 전) 없는 열만 빼고 다시 읽는다.
+  for (let tries = 0; error && tries < 3; tries++) {
+    const missing = missingOptionalColumns(error, OPTIONAL_REVIEW_COLUMNS).filter((c) => cols.includes(c));
+    if (!missing.length) break;
+    cols = cols.filter((c) => !missing.includes(c));
+    ({ data, error } = await query(cols.join(",")));
   }
   if (error) {
     console.warn("후기 불러오기 실패:", error);
@@ -1250,24 +1324,28 @@ function renderReviews() {
   const q = normalizeName(reviewsSearch.value.trim());
   const t = cleanTeacher(reviewsTeacher.value);
   const area = reviewsArea.value;
+  const interest = reviewsInterest.value;
   const areaOf = {};
   baseSubjects.forEach((s) => (areaOf[s.name] = areaOf[s.name] || s.area));
+  const interestsOf = (r) => (r.interests ? r.interests.split(",").filter(Boolean) : []);
 
   const rows = reviewsData.filter(
     (r) =>
       (!q || normalizeName(r.subject_name).includes(q)) &&
       (!t || (r.teacher || "").includes(t)) &&
-      (!area || areaOf[r.subject_name] === area)
+      (!area || areaOf[r.subject_name] === area) &&
+      (!interest || interestsOf(r).includes(interest))
   );
 
   const names = new Set(rows.map((r) => r.subject_name));
   const teachers = new Set(rows.map((r) => r.teacher).filter(Boolean));
   reviewsBreakdown.innerHTML = "";
+  reviewsCompare.innerHTML = "";
   if (!rows.length) {
     reviewsSummary.textContent = "";
   } else {
     const avg = rows.reduce((sum, r) => sum + r.rating, 0) / rows.length;
-    const scope = [t ? `${escapeHtml(t)} 선생님` : "", names.size > 1 ? `과목 ${names.size}개` : ""].filter(Boolean).join(" · ");
+    const scope = [t ? `${escapeHtml(t)} 선생님` : "", interest ? `관심 ${escapeHtml(interest)}` : "", names.size > 1 ? `과목 ${names.size}개` : ""].filter(Boolean).join(" · ");
     reviewsSummary.innerHTML = `<b>★${avg.toFixed(1)}</b> · 후기 ${rows.length}개${scope ? " · " + scope : ""}`;
 
     // 한 과목만 보고 있고 선생님이 둘 이상이면 선생님별 평균을 칩으로 보여준다(누르면 그 선생님만 보기).
@@ -1285,6 +1363,16 @@ function renderReviews() {
         .map(([name, v]) => `<button type="button" class="teacher-chip" data-teacher="${escapeHtml(name)}">${escapeHtml(name)} ★${(v.sum / v.n).toFixed(1)} (${v.n})</button>`)
         .join("");
     }
+
+    // 한 과목만 보고 있을 때, 그 과목에 흥미가 있던 사람과 아닌 사람의 평균을 나란히 보여줘서 후기를 해석하는 데 참고하게 한다.
+    if (names.size === 1) {
+      const keen = rows.filter((r) => r.interested === true);
+      const rest = rows.filter((r) => r.interested === false);
+      const mean = (list) => (list.reduce((sum, r) => sum + r.rating, 0) / list.length).toFixed(1);
+      if (keen.length) {
+        reviewsCompare.innerHTML = `흥미가 있던 사람 <b>★${mean(keen)}</b> (${keen.length}명)${rest.length ? ` · 그 외 <b>★${mean(rest)}</b> (${rest.length}명)` : ""}`;
+      }
+    }
   }
 
   reviewsList.innerHTML = rows.length
@@ -1294,8 +1382,13 @@ function renderReviews() {
           const comment = r.comment ? `<p class="review-card__comment">${escapeHtml(r.comment)}</p>` : "";
           const teacher = r.teacher ? `<span class="review-card__teacher">${escapeHtml(r.teacher)} 선생님</span>` : "";
           const extra = areaOf[r.subject_name] ? "" : '<span class="review-card__tag">목록 외 과목</span>';
-          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}${extra}${teacher}</span>
-            <span class="review-card__stars">${starsHtml(r.rating)}</span></div>${comment}
+          const keen = r.interested === true ? '<span class="review-card__tag is-interest">흥미 있었음</span>' : "";
+          const tags = interestsOf(r);
+          const mine = tags.length
+            ? `<div class="review-card__interest">작성자 관심 분야 · ${tags.map((x) => escapeHtml(x)).join(" · ")}</div>`
+            : "";
+          return `<div class="review-card"><div class="review-card__top"><span class="review-card__name">${escapeHtml(r.subject_name)}${extra}${keen}${teacher}</span>
+            <span class="review-card__stars">${starsHtml(r.rating)}</span></div>${comment}${mine}
             <div class="review-card__date">${date}</div></div>`;
         })
         .join("")
@@ -1311,6 +1404,8 @@ reviewsBreakdown.addEventListener("click", (e) => {
   renderReviews();
 });
 reviewsArea.addEventListener("change", renderReviews);
+INTEREST_TAGS.forEach((t) => reviewsInterest.add(new Option(`관심 분야: ${t}`, t)));
+reviewsInterest.addEventListener("change", renderReviews);
 
 function openReviewsScreen() {
   showScreen("reviews");
@@ -1811,6 +1906,7 @@ function collectSnapshot(screen) {
     rating: writeRating,
     teacher: document.getElementById("write-teacher").value,
     comment: document.getElementById("write-comment").value,
+    interest: writeInterest.querySelector(".interest-box") ? readInterestBox(writeInterest.querySelector(".interest-box")) : null,
   };
   const hasDraft = !!draft.selected; // 후기는 과목을 고른 뒤에만 "작성 중"으로 본다
   return {
@@ -1830,7 +1926,7 @@ function collectSnapshot(screen) {
     catalog: catalogEditCount() > 0 ? { items: subjectData, deleted: catalogDeleted } : null,
     photoCount: photos.length,
     write: hasDraft ? draft : null,
-    filters: { q: reviewsSearch.value, teacher: reviewsTeacher.value, area: reviewsArea.value },
+    filters: { q: reviewsSearch.value, teacher: reviewsTeacher.value, area: reviewsArea.value, interest: reviewsInterest.value },
   };
 }
 
@@ -1914,6 +2010,8 @@ function resetAllInputs() {
   reviewsSearch.value = "";
   reviewsTeacher.value = "";
   reviewsArea.value = "";
+  reviewsInterest.value = "";
+  writeInterest.innerHTML = "";
   refreshNameList();
   renderCatalog();
   updateSubmitState();
@@ -2052,6 +2150,7 @@ async function resumeProgress() {
           setWriteStars(d.rating || 0);
           document.getElementById("write-teacher").value = d.teacher || "";
           document.getElementById("write-comment").value = d.comment || "";
+          if (d.interest) writeInterest.innerHTML = interestBoxHtml(false, d.interest.interests, d.interest.interested);
         }
       }
     }
@@ -2060,6 +2159,7 @@ async function resumeProgress() {
     reviewsSearch.value = f.q || "";
     reviewsTeacher.value = f.teacher || "";
     reviewsArea.value = f.area || "";
+    reviewsInterest.value = f.interest || "";
     openReviewsScreen();
   }
   showToast("저장해 둔 곳에서 이어서 시작해요.");
