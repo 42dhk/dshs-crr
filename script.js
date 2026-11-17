@@ -536,14 +536,15 @@ function renderGraduationRef(ctx) {
       : "";
 
   return `
-    <div class="plan-card grad-card">
-      <div class="plan-card__header">
+    <details class="plan-card grad-card">
+      <summary class="plan-card__header grad-summary">
         <span class="plan-card__title">졸업 최소이수학점 기준</span>
-      </div>
+        <span class="grad-summary__hint">눌러서 보기</span>
+      </summary>
       ${rows}
       ${hint}
-      <p class="grad-footnote">기준은 4개 학기(2학년1학기~3학년2학기) 누적이에요. 아래 안들은 "지금까지 들은 학점 + 이번 안 + 앞으로 들을 수 있는 학점"으로 졸업이 불가능해지는 경우를 걸러낸 거예요.</p>
-    </div>
+      <p class="grad-footnote">기준은 4개 학기(2학년1학기~3학년2학기) 누적이에요. 위 안들은 "지금까지 들은 학점 + 이번 안 + 앞으로 들을 수 있는 학점"으로 졸업이 불가능해지는 경우를 걸러낸 거예요.</p>
+    </details>
   `;
 }
 
@@ -614,6 +615,7 @@ function renderPlan(plan, label, desc) {
         <span class="plan-card__title">${label}</span>
         <span class="plan-card__badge${plan.infeasible ? " is-bad" : ""}">${plan.overloaded ? "36시수 초과" : plan.infeasible ? "졸업 기준 미달" : "추천안"}</span>
       </div>
+      <button type="button" class="plan-detail-btn" data-go="detail">🔍 과목별 추천 이유 자세히 보기</button>
       <div class="plan-stats">
         <div class="plan-stat"><strong>${plan.totalCredits}</strong><span>이수학점</span></div>
         <div class="plan-stat"><strong>${plan.totalHours}</strong><span>주당 시수</span></div>
@@ -919,10 +921,12 @@ function runRecommendation() {
     const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, { must, never });
 
     resultContent.innerHTML =
-      renderGraduationRef(gradContext(grade, term, completed)) +
-      plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`, c.desc)).join("");
+      plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`, c.desc)).join("") +
+      renderGraduationRef(gradContext(grade, term, completed));
 
     showScreen("result");
+    // 추천안이 바로 보이도록 맨 위로
+    document.querySelectorAll("#screen-result, #screen-result .screen__body, #result-content").forEach((el) => (el.scrollTop = 0));
   });
 }
 
@@ -2346,6 +2350,14 @@ refreshResumeCard();
 
 // ── 추천안 카드의 "추천 과목 / 자세히" 탭과 "모두 펼치기" ─────────────────
 resultContent.addEventListener("click", (e) => {
+  const go = e.target.closest(".plan-detail-btn");
+  if (go) {
+    const card = go.closest(".plan-card");
+    const target = card.querySelector(`.plan-tab[data-pane="${go.dataset.go}"]`);
+    if (target) target.click();
+    card.querySelector(".plan-tabs").scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
   const tab = e.target.closest(".plan-tab");
   if (tab) {
     const card = tab.closest(".plan-card");

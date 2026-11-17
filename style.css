@@ -1057,6 +1057,48 @@ body {
   border: 1.5px solid var(--border);
 }
 
+.grad-summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+}
+
+.grad-summary::-webkit-details-marker {
+  display: none;
+}
+
+.grad-card[open] > .grad-summary {
+  margin-bottom: 8px;
+}
+
+.grad-summary__hint {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+}
+
+.grad-card[open] .grad-summary__hint {
+  display: none;
+}
+
+.plan-detail-btn {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 1.5px solid var(--primary);
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.plan-detail-btn:hover {
+  filter: brightness(0.97);
+}
+
 .grad-row {
   padding: 10px 0;
   border-top: 1px solid var(--border);
