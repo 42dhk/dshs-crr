@@ -51,21 +51,28 @@ function isSimilarToDislike(subjectName, dislikeTerms) {
   });
 }
 
-function interestScore(subjectItem, interests) {
-  let score = 0;
+// 관심분야 태그별로 이 과목에 몇 점이 더해지는지(추천 사유 설명에도 쓴다)
+function interestDetail(subjectItem, interests) {
+  const out = [];
   interests.forEach((tag) => {
+    let value = 0;
     (INTEREST_MAP[tag] || []).forEach((rule) => {
       if (!rule.areas.includes(subjectItem.area)) return;
       if (!rule.keyword) {
-        score += 2;
+        value += 2;
         return;
       }
       const keywords = Array.isArray(rule.keyword) ? rule.keyword : [rule.keyword];
-      if (keywords.some((k) => subjectItem.name.includes(k))) score += 2;
-      else if (!rule.strict) score += 0.5;
+      if (keywords.some((k) => subjectItem.name.includes(k))) value += 2;
+      else if (!rule.strict) value += 0.5;
     });
+    if (value) out.push({ tag, value });
   });
-  return score;
+  return out;
+}
+
+function interestScore(subjectItem, interests) {
+  return interestDetail(subjectItem, interests).reduce((sum, d) => sum + d.value, 0);
 }
 
 // 과목 데이터: 기본은 subjects.js(대비용). Supabase에서 불러오기에 성공하면 DB 데이터로 교체한다.
@@ -222,6 +229,8 @@ function gradTargetsThisTerm(ctx) {
   return need;
 }
 
+const fmtNum = (n) => String(Math.round(n * 10) / 10);
+
 // 관심분야/비선호/AP 선호/선이수 과목을 반영해 학년·학기에 맞는 시간표 한 안을 구성한다.
 // completed: 이전 학기에 이미 들은 과목명 Set (Ⅱ과목·실험과목의 선이수 조건 확인용)
 // hourCap: 주당 시수 상한(학기별 27학점 이내 권장 기준).
@@ -248,8 +257,21 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
     const disliked = isSimilarToDislike(s.name, dislikeTerms);
     const alreadyTaken = false;
     const isMust = must.has(s.name);
+
+    // 추천 사유로 보여줄 점수 구성(실제 점수 계산은 아래 score 식과 같은 항목이다)
+    const parts = interestDetail(s, interests).map((d) => ({ label: `관심분야(${d.tag})`, value: d.value }));
+    if (apPreferred === true && s.ap) parts.push({ label: "AP 선호", value: 1 });
+    if (apPreferred === "avoid" && s.ap) parts.push({ label: "AP 부담 줄이기", value: -1.5 });
+    const rb = ratingBonus(s.name);
+    if (Math.abs(rb) >= 0.05) {
+      const r = subjectRatings[s.name];
+      parts.push({ label: `후기 평점 ★${r.avg.toFixed(1)}(${r.count}명)`, value: rb });
+    }
+    if (disliked) parts.push({ label: "비선호 단어와 비슷함", value: -3 });
+
     return {
       ...s,
+      parts,
       hours: s.credit + (s.ap ? 1 : 0),
       disliked,
       alreadyTaken,
@@ -263,10 +285,12 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   const pickedNames = new Set();
   let totalHours = 0;
 
-  function add(s) {
+  const why = {}; // 과목명 -> 이 안에 담은 이유 { kind, text, extra, details }
+  function add(s, reason) {
     picked.push(s);
     pickedNames.add(s.name);
     totalHours += s.hours;
+    why[s.name] = reason || { kind: "시수채움", text: "" };
   }
 
   // 이미 이수한 과목은 다시 추천하지 않되, 선이수 조건을 확인할 때는 "이수한 과목"으로 취급한다.
@@ -276,7 +300,9 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   }
 
   // 1) 필수 과목은 무조건 포함
-  scored.filter((s) => s.mandatory).forEach(add);
+  scored
+    .filter((s) => s.mandatory)
+    .forEach((s) => add(s, { kind: "필수", text: "선택지가 없는 필수 과목이라 모든 안에 자동으로 들어가요." }));
 
   // 2) 택N 그룹: 그룹 안에서 점수 높은 순으로 N개 선택
   const groups = {};
@@ -285,22 +311,44 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   });
   Object.entries(groups).forEach(([groupId, options]) => {
     const pickCount = GROUP_PICK[groupId] || 1;
-    [...options]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, pickCount)
-      .forEach(add);
+    const sorted = [...options].sort((a, b) => b.score - a.score);
+    const chosen = sorted.slice(0, pickCount);
+    chosen.forEach((s) => {
+      const others = sorted.filter((o) => !chosen.includes(o));
+      // 후보들의 점수가 같으면 "가장 높다"고 말하지 않고, 목록 앞쪽 과목을 골랐다고 솔직하게 적는다.
+      const tied = others.some((o) => o.score === s.score);
+      const head = `${s.area} 택${pickCount} 묶음(후보 ${options.length}개)`;
+      add(s, {
+        kind: s.must ? "꼭" : "택일",
+        text: s.must
+          ? "꼭 들을 과목으로 지정하셨어요. 같은 묶음에서 이 과목을 골랐어요."
+          : tied
+            ? `${head}: 후보들의 추천 점수가 같아서(관심분야·후기 차이가 없어요) 목록 앞쪽 과목을 골랐어요.`
+            : pickCount === 1
+              ? `${head}에서 추천 점수가 가장 높아요.`
+              : `${head}에서 추천 점수가 높은 상위 ${pickCount}개 안에 들어요.`,
+        extra: others.length
+          ? `같은 묶음에서 밀린 후보: ${others.map((o) => `${o.name}(점수 ${fmtNum(o.score - (o.must ? 1000 : 0))})`).join(", ")}`
+          : null,
+      });
+    });
   });
 
   // 2.5) 꼭 들을 과목: 시수 상한과 상관없이 먼저 담는다.
   // 선이수 과목이 이번 학기에 열려 있으면 같이 담고, 그럴 수 없으면 못 담은 이유를 알려준다.
   const notes = [];
-  function forceAdd(s, depth) {
+  function forceAdd(s, depth, parent) {
     if (pickedNames.has(s.name)) return true;
     if (s.requires && !completed.has(s.requires) && !pickedNames.has(s.requires)) {
       const pre = scored.find((x) => x.name === s.requires && !x.group && !x.mandatory);
-      if (!pre || depth >= 3 || !forceAdd(pre, depth + 1)) return false;
+      if (!pre || depth >= 3 || !forceAdd(pre, depth + 1, s)) return false;
     }
-    add(s);
+    add(
+      s,
+      parent
+        ? { kind: "선이수", text: `꼭 들을 과목 '${parent.name}'을 들으려면 먼저(또는 함께) 들어야 하는 선이수 과목이라 같이 담았어요.` }
+        : { kind: "꼭", text: "꼭 들을 과목으로 지정하셨어요. 시수 한도와 상관없이 먼저 담았어요." }
+    );
     return true;
   }
   scored
@@ -319,6 +367,14 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   const freePool = scored.filter((s) => !s.mandatory && !s.group && !s.alreadyTaken && !s.disliked);
   const freePoolByScore = [...freePool].sort((a, b) => b.score - a.score);
 
+  // 점수순으로 채운 과목의 이유: 관심분야와 맞으면 "관심 일치", 아니면 "시수 채움"
+  function fillReason(s) {
+    const tags = s.parts.filter((p) => p.label.startsWith("관심분야") && p.value > 0).map((p) => p.label.slice(5, -1));
+    return tags.length
+      ? { kind: "관심", text: `관심분야(${tags.join("·")})와 맞는 과목이에요. 주당 시수 한도(${hourCap}) 안에서 점수가 높은 순으로 담았어요.` }
+      : { kind: "시수채움", text: `관심분야에 직접 맞지는 않지만, 주당 시수 한도(${hourCap}) 안에서 추천 점수가 높은 순으로 남은 자리를 채웠어요.` };
+  }
+
   function fillLoop(candidates) {
     let addedSomething = true;
     while (addedSomething) {
@@ -327,7 +383,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
         if (pickedNames.has(s.name)) continue;
         if (!isEligible(s)) continue;
         if (totalHours + s.hours > hourCap) continue;
-        add(s);
+        add(s, fillReason(s));
         addedSomething = true;
       }
     }
@@ -345,7 +401,11 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
           (s) => s.area === area && !pickedNames.has(s.name) && isEligible(s) && totalHours + s.hours <= hourCap
         );
         if (next) {
-          add(next);
+          const rule = GRADUATION_MIN_CREDITS.find((r) => r.areas.includes(area));
+          add(next, {
+            kind: "졸업기준",
+            text: `졸업 기준(${rule ? rule.label : area})을 따라가려면 이번 학기에 '${area}' 영역을 ${need[area]}학점 이상 담아야 해서, 이 영역 과목 중 점수가 높은 순으로 골랐어요.`,
+          });
           got += next.credit;
           progressed = true;
         }
@@ -365,6 +425,33 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   const overloaded = totalHours > 36;
   if (overloaded) notes.push(`주당 시수가 ${totalHours}로 일주일 36시수를 넘어요. 꼭 들을 과목을 줄여보세요.`);
 
+  // "자세히" 탭에 보여줄 세부 사유
+  picked.forEach((s) => {
+    const w = why[s.name] || { kind: "시수채움", text: "" };
+    const d = [];
+    if (s.mandatory) {
+      d.push("선택지가 없는 필수 과목이라 점수와 상관없이 모든 안에 들어가요.");
+    } else {
+      const shown = s.score - (s.must ? 1000 : 0);
+      if (s.must) d.push("꼭 들을 과목으로 지정해서 점수·시수 한도와 상관없이 넣었어요.");
+      d.push(
+        s.parts.length
+          ? `추천 점수 ${fmtNum(shown)} = ${s.parts.map((p) => `${p.label} ${p.value > 0 ? "+" : ""}${fmtNum(p.value)}`).join(" · ")}`
+          : `추천 점수 ${fmtNum(shown)} (관심분야·AP·후기에서 더해진 점수가 없어요)`
+      );
+    }
+    d.push(`주당 시수 ${s.hours} = 학점 ${s.credit}${s.ap ? " + AP 1시수" : ""}`);
+    if (s.requires) d.push(`선이수 ${s.requires}: ${completed.has(s.requires) ? "이전 학기에 들어서 충족돼요." : "이번 안에서 함께 들어서 충족돼요."}`);
+    const r = subjectRatings[s.name];
+    if (r) d.push(`후기 평균 ★${r.avg.toFixed(1)} (${r.count}명)`);
+    GRADUATION_MIN_CREDITS.filter((g) => g.areas.includes(s.area)).forEach((g) =>
+      d.push(`졸업 기준 '${g.label}'에 ${s.credit}학점이 보태져요.`)
+    );
+    if (w.extra) d.push(w.extra);
+    w.details = d;
+    why[s.name] = w;
+  });
+
   return {
     subjects: picked,
     totalHours,
@@ -373,6 +460,7 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
     areaCredits,
     grad,
     notes,
+    why,
     overloaded,
     infeasible: overloaded || grad.some((g) => g.status === "impossible"),
   };
@@ -383,15 +471,16 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
 function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, prefs) {
   const gradCtx = gradContext(grade, term, completed, prefs && prefs.never);
   const attempts = [
-    { label: "균형 잡힌 시간표", hourCap: 27, balanceMode: true },
-    { label: "관심 집중형 시간표", hourCap: 27, balanceMode: false },
-    { label: "여유로운 시간표", hourCap: 24, balanceMode: true },
-    { label: "여유로운 시간표", hourCap: 21, balanceMode: true },
+    { label: "균형 잡힌 시간표", hourCap: 27, balanceMode: true, desc: "졸업 기준에서 이번 학기에 필요한 영역을 먼저 채우고, 남는 시수를 관심분야 점수가 높은 순으로 채운 안이에요." },
+    { label: "관심 집중형 시간표", hourCap: 27, balanceMode: false, desc: "졸업 기준 영역을 따로 챙기지 않고 관심분야 점수가 높은 과목을 우선해서 담은 안이에요. 그래도 졸업 기준을 채울 수 없게 되는 안은 걸러요." },
+    { label: "여유로운 시간표", hourCap: 24, balanceMode: true, desc: "주당 시수 한도를 24로 낮춰 공강을 늘린 안이에요. 졸업 기준에서 필요한 영역은 먼저 채워요." },
+    { label: "여유로운 시간표", hourCap: 21, balanceMode: true, desc: "주당 시수 한도를 21로 낮춰 공강을 더 늘린 안이에요. 졸업 기준에서 필요한 영역은 먼저 채워요." },
   ];
   // AP 과목(주당 시수가 1 더 듦)을 원하지 않는 사용자에게는 AP 부담을 줄인 안도 후보에 넣는다.
   if (apPreferred !== true) {
-    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 27, balanceMode: true, ap: "avoid" });
-    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 24, balanceMode: true, ap: "avoid" });
+    const apDesc = "AP 과목(학점보다 주 1시수가 더 듦)의 점수를 낮춰서 부담을 줄인 안이에요.";
+    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 27, balanceMode: true, ap: "avoid", desc: apDesc });
+    attempts.push({ label: "AP 부담을 줄인 시간표", hourCap: 24, balanceMode: true, ap: "avoid", desc: apDesc });
   }
 
   const candidates = attempts.map((a) => ({
@@ -458,7 +547,7 @@ function renderGraduationRef(ctx) {
   `;
 }
 
-function renderPlan(plan, label) {
+function renderPlan(plan, label, desc) {
   const byArea = {};
   plan.subjects.forEach((s) => {
     (byArea[s.area] ||= []).push(s);
@@ -478,6 +567,22 @@ function renderPlan(plan, label) {
       return `<div class="plan-area"><div class="plan-area__name">${area}</div><div class="plan-subject-list">${subjectsHtml}</div></div>`;
     })
     .join("");
+
+  // "자세히" 탭: 과목마다 한 줄 이유 + 눌러서 펼치는 세부 항목
+  const kindLabel = { 필수: "필수 과목", 꼭: "꼭 들을 과목", 선이수: "선이수 동반", 택일: "택일 선택", 졸업기준: "졸업 기준", 관심: "관심 일치", 시수채움: "시수 채움" };
+  const kindClass = { 필수: "mandatory", 꼭: "must", 선이수: "prereq", 택일: "group", 졸업기준: "grad", 관심: "interest", 시수채움: "fill" };
+  const detailRows = AREA_ORDER.filter((area) => byArea[area])
+    .map((area) => {
+      const rows = byArea[area]
+        .map((s) => {
+          const w = (plan.why && plan.why[s.name]) || { kind: "시수채움", text: "", details: [] };
+          return `<details class="why-item"><summary><span class="why-item__head"><span class="why-item__name">${escapeHtml(s.name)}<small>${s.credit}학점${s.ap ? " · AP" : ""}</small></span><span class="why-kind is-${kindClass[w.kind] || "fill"}">${kindLabel[w.kind] || w.kind}</span></span><span class="why-item__text">${escapeHtml(w.text)}</span></summary><ul class="why-list">${(w.details || []).map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul></details>`;
+        })
+        .join("");
+      return `<div class="plan-area"><div class="plan-area__name">${area}</div>${rows}</div>`;
+    })
+    .join("");
+  const detailHtml = `<div class="why-intro">${escapeHtml(desc || "")}</div><button type="button" class="why-toggle-all">모두 펼치기</button>${detailRows}`;
 
   const statusText = { met: "충족 ✓", ok: "진행 중", impossible: "불가능 ⚠" };
   const violationHtml = plan.grad.length
@@ -517,7 +622,12 @@ function renderPlan(plan, label) {
       </div>
       ${notesHtml}
       ${violationHtml}
-      ${areaHtml}
+      <div class="plan-tabs" role="tablist">
+        <button type="button" class="plan-tab is-active" role="tab" aria-selected="true" data-pane="list">추천 과목</button>
+        <button type="button" class="plan-tab" role="tab" aria-selected="false" data-pane="detail">자세히</button>
+      </div>
+      <div class="plan-pane" data-pane="list">${areaHtml}</div>
+      <div class="plan-pane" data-pane="detail" hidden>${detailHtml}</div>
     </div>
   `;
 }
@@ -810,7 +920,7 @@ function runRecommendation() {
 
     resultContent.innerHTML =
       renderGraduationRef(gradContext(grade, term, completed)) +
-      plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`)).join("");
+      plans.map((c, i) => renderPlan(c.plan, `추천안 ${i + 1} · ${c.label}`, c.desc)).join("");
 
     showScreen("result");
   });
@@ -2233,3 +2343,25 @@ window.addEventListener("pagehide", autosaveNow);
 pendingResume = !!readSnapshot();
 lastSavedPhotoSig = "";
 refreshResumeCard();
+
+// ── 추천안 카드의 "추천 과목 / 자세히" 탭과 "모두 펼치기" ─────────────────
+resultContent.addEventListener("click", (e) => {
+  const tab = e.target.closest(".plan-tab");
+  if (tab) {
+    const card = tab.closest(".plan-card");
+    card.querySelectorAll(".plan-tab").forEach((t) => {
+      const on = t === tab;
+      t.classList.toggle("is-active", on);
+      t.setAttribute("aria-selected", String(on));
+    });
+    card.querySelectorAll(".plan-pane").forEach((pane) => (pane.hidden = pane.dataset.pane !== tab.dataset.pane));
+    return;
+  }
+  const all = e.target.closest(".why-toggle-all");
+  if (all) {
+    const items = [...all.closest(".plan-pane").querySelectorAll(".why-item")];
+    const open = !items.every((d) => d.open);
+    items.forEach((d) => (d.open = open));
+    all.textContent = open ? "모두 접기" : "모두 펼치기";
+  }
+});
