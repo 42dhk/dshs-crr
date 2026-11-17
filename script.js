@@ -69,8 +69,14 @@ function interestScore(subjectItem, interests) {
 }
 
 // 과목 데이터: 기본은 subjects.js(대비용). Supabase에서 불러오기에 성공하면 DB 데이터로 교체한다.
-let subjectData = SUBJECTS;
+//  - baseSubjects: 학교 원본(DB/로컬). 후기 화면처럼 "공식 과목 이름"이 필요한 곳에서 쓴다.
+//  - subjectData : 사용자가 확인·수정한 "내 수강신청표". 추천은 이 목록으로 계산한다.
+const cloneSubject = (s) => ({ ...s });
+let baseSubjects = SUBJECTS.map(cloneSubject);
+let subjectData = SUBJECTS.map(cloneSubject);
 let subjectSource = "로컬(subjects.js)";
+let catalogDeleted = 0; // 사용자가 목록에서 지운 과목 수
+const catalogEditCount = () => subjectData.filter((s) => s._edit).length + catalogDeleted;
 
 async function loadSubjectsFromDb() {
   try {
@@ -79,7 +85,7 @@ async function loadSubjectsFromDb() {
     // DB의 과목 분류가 옛 버전(세미나·토픽이 과학/수학에 흩어진 상태)이면 맞지 않으므로 로컬 데이터를 쓴다.
     // supabase/reseed-subjects.sql 을 실행해 DB를 최신으로 맞추면 자동으로 DB 데이터를 쓴다.
     if (!data.some((r) => r.area === "과학정보수학")) throw new Error("DB 과목 분류가 최신이 아님(reseed-subjects.sql 필요)");
-    subjectData = data.map((r) => ({
+    const loaded = data.map((r) => ({
       id: `db${r.id}`,
       name: r.name,
       credit: r.credit,
@@ -91,6 +97,9 @@ async function loadSubjectsFromDb() {
       mandatory: r.mandatory,
       requires: r.requires,
     }));
+    baseSubjects = loaded;
+    // 사용자가 이미 목록을 고쳤다면(네트워크가 아주 느린 경우) 고친 내용을 덮어쓰지 않는다.
+    if (catalogEditCount() === 0) subjectData = loaded.map(cloneSubject);
     subjectSource = "Supabase DB";
   } catch (e) {
     console.warn("DB에서 과목을 불러오지 못해 로컬 데이터를 사용합니다:", e);
@@ -144,7 +153,7 @@ const GRAD_AREAS = ["과학", "정보과학", "수학", "AI융합", "과학정�
 //  - earned: 지금까지 "들은 과목"으로 체크한 과목의 영역별 학점
 //  - future: 이번 학기 이후 학기에 열리는 과목(이름 기준 중복 제거, 이미 들은 과목 제외) 영역별 {과목명 -> 학점}
 //  - termsLeft: 이번 학기를 포함해 남은 학기 수
-function gradContext(grade, term, completed) {
+function gradContext(grade, term, completed, never) {
   const selIdx = termIndex(grade, term);
   const byName = {};
   subjectData.forEach((s) => (byName[s.name] ||= s));
@@ -158,6 +167,7 @@ function gradContext(grade, term, completed) {
   const future = {};
   subjectData.forEach((s) => {
     if (termIndex(s.grade, s.term) <= selIdx || !GRAD_AREAS.includes(s.area) || completed.has(s.name)) return;
+    if (never && never.has(s.name)) return;
     (future[s.area] ||= new Map()).set(s.name, s.credit);
   });
 
@@ -216,24 +226,36 @@ function gradTargetsThisTerm(ctx) {
 // completed: 이전 학기에 이미 들은 과목명 Set (Ⅱ과목·실험과목의 선이수 조건 확인용)
 // hourCap: 주당 시수 상한(학기별 27학점 이내 권장 기준).
 // balanceMode: true면 졸업 기준(gradTargetsThisTerm)에서 요구하는 학점을 영역별로 먼저 채운 뒤 나머지를 관심 순으로 채운다.
-function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, hourCap, balanceMode, gradCtx) {
+function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, hourCap, balanceMode, gradCtx, prefs) {
+  // prefs.must: 꼭 들을 과목 이름 Set(모든 안에 넣는다) / prefs.never: 절대 안 들을 과목 이름 Set(후보에서 뺀다)
+  const must = (prefs && prefs.must) || new Set();
+  const never = (prefs && prefs.never) || new Set();
+
   // 이미 들은 과목(이름 기준이라 다른 학기에 같은 과목이 열려도 함께 제외)과
-  // 이번 학기에 폐강된 과목은 필수·택N·자유선택 구분 없이 후보에서 아예 뺀다.
-  // 단, 들은 과목은 아래 isEligible에서 선이수 조건을 충족한 것으로 계속 인정한다.
+  // 이번 학기에 폐강된 과목, 절대 안 들을 과목은 택N·자유선택 구분 없이 후보에서 아예 뺀다.
+  // 단, 선택지가 없는 필수 과목은 뺄 수 없고, 꼭 들을 과목으로도 지정했다면 꼭 들을 쪽이 이긴다.
+  // 들은 과목은 아래 isEligible에서 선이수 조건을 충족한 것으로 계속 인정한다.
   const pool = subjectData.filter(
-    (s) => s.grade === grade && s.term === term && !completed.has(s.name) && !cancelled.has(s.name)
+    (s) =>
+      s.grade === grade &&
+      s.term === term &&
+      !completed.has(s.name) &&
+      !cancelled.has(s.name) &&
+      !(never.has(s.name) && !must.has(s.name) && !s.mandatory)
   );
 
   const scored = pool.map((s) => {
     const disliked = isSimilarToDislike(s.name, dislikeTerms);
     const alreadyTaken = false;
+    const isMust = must.has(s.name);
     return {
       ...s,
       hours: s.credit + (s.ap ? 1 : 0),
       disliked,
       alreadyTaken,
+      must: isMust,
       score:
-        interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred === true && s.ap ? 1 : 0) - (apPreferred === "avoid" && s.ap ? 1.5 : 0) + ratingBonus(s.name),
+        (isMust ? 1000 : 0) + interestScore(s, interests) - (disliked ? 3 : 0) + (apPreferred === true && s.ap ? 1 : 0) - (apPreferred === "avoid" && s.ap ? 1.5 : 0) + ratingBonus(s.name),
     };
   });
 
@@ -268,6 +290,28 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
       .slice(0, pickCount)
       .forEach(add);
   });
+
+  // 2.5) 꼭 들을 과목: 시수 상한과 상관없이 먼저 담는다.
+  // 선이수 과목이 이번 학기에 열려 있으면 같이 담고, 그럴 수 없으면 못 담은 이유를 알려준다.
+  const notes = [];
+  function forceAdd(s, depth) {
+    if (pickedNames.has(s.name)) return true;
+    if (s.requires && !completed.has(s.requires) && !pickedNames.has(s.requires)) {
+      const pre = scored.find((x) => x.name === s.requires && !x.group && !x.mandatory);
+      if (!pre || depth >= 3 || !forceAdd(pre, depth + 1)) return false;
+    }
+    add(s);
+    return true;
+  }
+  scored
+    .filter((s) => s.must && !s.mandatory && !s.group)
+    .forEach((s) => {
+      if (!forceAdd(s, 0))
+        notes.push(`꼭 들을 과목 '${s.name}'은 선이수 과목(${s.requires})을 들은 적이 없고 이번 학기에 함께 들을 수도 없어서 담지 못했어요.`);
+    });
+  scored
+    .filter((s) => s.must && s.group && !pickedNames.has(s.name))
+    .forEach((s) => notes.push(`꼭 들을 과목 '${s.name}'은 같은 묶음에서 정해진 개수만 고를 수 있어서 담지 못했어요.`));
 
   // 3) 자유 선택 풀(과학/정보과학/수학/AI융합/과학정보수학/AI융합(심화)): 점수 높은 순으로 상한까지 채운다.
   // Ⅱ과목·실험과목은 "선이수 과목이 이미 완료되었거나 이번 학기에 함께 선택될 때만" 담을 수 있어서,
@@ -318,22 +362,26 @@ function buildPlan(grade, term, interests, dislikeTerms, apPreferred, completed,
   });
 
   const grad = gradCtx ? gradProgress(picked, gradCtx) : [];
+  const overloaded = totalHours > 36;
+  if (overloaded) notes.push(`주당 시수가 ${totalHours}로 일주일 36시수를 넘어요. 꼭 들을 과목을 줄여보세요.`);
 
   return {
     subjects: picked,
     totalHours,
     totalCredits,
-    freeHours: 36 - totalHours,
+    freeHours: Math.max(0, 36 - totalHours),
     areaCredits,
     grad,
-    infeasible: grad.some((g) => g.status === "impossible"),
+    notes,
+    overloaded,
+    infeasible: overloaded || grad.some((g) => g.status === "impossible"),
   };
 }
 
 // 여러 후보 시간표를 만들어, 졸업 기준을 채울 수 없게 되는 안은 버리고 남은 안 중에서 고른다.
 // 만족하는 안이 하나도 없으면 "불가능한 묶음이 가장 적은 안"을 경고와 함께 보여준다.
-function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled) {
-  const gradCtx = gradContext(grade, term, completed);
+function generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, prefs) {
+  const gradCtx = gradContext(grade, term, completed, prefs && prefs.never);
   const attempts = [
     { label: "균형 잡힌 시간표", hourCap: 27, balanceMode: true },
     { label: "관심 집중형 시간표", hourCap: 27, balanceMode: false },
@@ -348,7 +396,7 @@ function generatePlans(grade, term, interests, dislikeTerms, apPreferred, comple
 
   const candidates = attempts.map((a) => ({
     ...a,
-    plan: buildPlan(grade, term, interests, dislikeTerms, a.ap || apPreferred, completed, cancelled, a.hourCap, a.balanceMode, gradCtx),
+    plan: buildPlan(grade, term, interests, dislikeTerms, a.ap || apPreferred, completed, cancelled, a.hourCap, a.balanceMode, gradCtx, prefs),
   }));
   const keyOf = (c) => c.plan.subjects.map((s) => s.name).sort().join("|");
 
@@ -423,7 +471,8 @@ function renderPlan(plan, label) {
         .map((s) => {
           const r = subjectRatings[s.name];
           const star = r ? `<span class="star-tag" title="후기 ${r.count}개">★${r.avg.toFixed(1)}</span>` : "";
-          return `<span class="plan-subject${s.ap ? " is-ap" : ""}">${s.name}(${s.credit})${s.ap ? '<span class="ap-tag">AP</span>' : ""}${star}</span>`;
+          const mustTag = s.must ? '<span class="must-tag">꼭</span>' : "";
+          return `<span class="plan-subject${s.ap ? " is-ap" : ""}${s.must ? " is-must" : ""}">${mustTag}${escapeHtml(s.name)}(${s.credit})${s.ap ? '<span class="ap-tag">AP</span>' : ""}${star}</span>`;
         })
         .join("");
       return `<div class="plan-area"><div class="plan-area__name">${area}</div><div class="plan-subject-list">${subjectsHtml}</div></div>`;
@@ -443,6 +492,11 @@ function renderPlan(plan, label) {
         .join("")}</div>`
     : "";
 
+  const notesHtml =
+    plan.notes && plan.notes.length
+      ? `<div class="plan-notes">${plan.notes.map((n) => `<div class="grad-warn">⚠ ${escapeHtml(n)}</div>`).join("")}</div>`
+      : "";
+
   // 안 전체 평균 별점: 별점이 있는 과목들의 평균만 계산한다(없으면 "-").
   const rated = plan.subjects.filter((s) => subjectRatings[s.name]);
   const avgRating = rated.length
@@ -453,7 +507,7 @@ function renderPlan(plan, label) {
     <div class="plan-card">
       <div class="plan-card__header">
         <span class="plan-card__title">${label}</span>
-        <span class="plan-card__badge${plan.infeasible ? " is-bad" : ""}">${plan.infeasible ? "졸업 기준 미달" : "추천안"}</span>
+        <span class="plan-card__badge${plan.infeasible ? " is-bad" : ""}">${plan.overloaded ? "36시수 초과" : plan.infeasible ? "졸업 기준 미달" : "추천안"}</span>
       </div>
       <div class="plan-stats">
         <div class="plan-stat"><strong>${plan.totalCredits}</strong><span>이수학점</span></div>
@@ -461,6 +515,7 @@ function renderPlan(plan, label) {
         <div class="plan-stat"><strong>${plan.freeHours}</strong><span>공강 시수</span></div>
         <div class="plan-stat"><strong>${avgRating === "-" ? "-" : "★" + avgRating}</strong><span>평균 별점</span></div>
       </div>
+      ${notesHtml}
       ${violationHtml}
       ${areaHtml}
     </div>
@@ -470,6 +525,7 @@ function renderPlan(plan, label) {
 const screens = {
   start: document.getElementById("screen-start"),
   upload: document.getElementById("screen-upload"),
+  review: document.getElementById("screen-review"),
   write: document.getElementById("screen-write"),
   reviews: document.getElementById("screen-reviews"),
   input: document.getElementById("screen-input"),
@@ -548,11 +604,11 @@ photoInput.addEventListener("change", () => {
 
 uploadNextBtn.addEventListener("click", () => {
   if (uploadNextBtn.disabled) return;
-  showScreen("input");
+  subjectsReady.then(openReviewScreen);
 });
 
 document.getElementById("btn-skip-upload").addEventListener("click", () => {
-  showScreen("input");
+  subjectsReady.then(openReviewScreen);
 });
 
 // 화면3: 관심 분야 칩 다중 선택
@@ -614,10 +670,14 @@ dislikeInput.addEventListener("keydown", (e) => {
   }
 });
 
-// 화면3: 수강신청표 — 이전 학기 과목은 클릭(들은 과목), 이번 학기 과목은 우클릭(폐강)
+// 화면3: 수강신청표
+//  - 이전 학기 과목: 클릭하면 "들은 과목"으로 표시/해제
+//  - 이번 학기 과목: 클릭할 때마다 폐강 → 꼭 들을 과목 → 절대 안 들을 과목 → 해제 순서로 바뀐다
 const catalogEl = document.getElementById("catalog");
 const takenNames = new Set(); // 들은 과목: 이름 기준(다른 학기에 같은 과목이 열려도 함께 적용)
 const cancelledKeys = new Set(); // 폐강: "학년-학기|과목명" 기준(폐강은 그 학기에만 해당)
+const mustKeys = new Set(); // 꼭 들을 과목: "학년-학기|과목명" 기준
+const neverNames = new Set(); // 절대 안 들을 과목: 이름 기준(어느 학기든 추천하지 않는다)
 
 function selectedGradeTerm() {
   return {
@@ -627,11 +687,40 @@ function selectedGradeTerm() {
 }
 const termIndex = (grade, term) => (grade - 2) * 2 + term;
 const cancelKey = (grade, term, name) => `${grade}-${term}|${name}`;
+const keyName = (k) => k.slice(k.indexOf("|") + 1);
+
+// 칩 한 개의 현재 지정 상태. 폐강 > 꼭 들음 > 절대 안 들음 > 없음 순으로 보여준다.
+function prefState(g, t, name) {
+  const k = cancelKey(g, t, name);
+  if (cancelledKeys.has(k)) return "cancelled";
+  if (mustKeys.has(k)) return "must";
+  if (neverNames.has(name)) return "never";
+  return "none";
+}
+
+// 클릭 한 번마다 다음 상태로 넘어간다: 없음 → 폐강 → 꼭 들음 → 절대 안 들음 → 없음
+// 선택지 없이 자동으로 들어가는 필수 과목은 "꼭/절대"가 의미 없어서 없음 ↔ 폐강만 오간다.
+function nextPrefState(state, mandatory) {
+  if (mandatory) return state === "cancelled" ? "none" : "cancelled";
+  return { none: "cancelled", cancelled: "must", must: "never", never: "none" }[state];
+}
+
+function applyPrefState(g, t, name, state) {
+  const k = cancelKey(g, t, name);
+  cancelledKeys.delete(k);
+  mustKeys.delete(k);
+  if (state === "cancelled") cancelledKeys.add(k);
+  else if (state === "must") mustKeys.add(k);
+  else if (state === "never") neverNames.add(name);
+  else neverNames.delete(name);
+}
 
 function renderCatalog() {
   const { grade: selGrade, term: selTerm } = selectedGradeTerm();
   const selIdx = termIndex(selGrade, selTerm);
-  const areaOrder = AREA_ORDER;
+  const priorNames = new Set(subjectData.filter((s) => termIndex(s.grade, s.term) < selIdx).map((s) => s.name));
+  const stateCls = { cancelled: " is-cancelled", must: " is-must", never: " is-never", none: "" };
+  const stateTitle = { cancelled: "폐강", must: "꼭 들을 과목", never: "절대 안 들을 과목", none: "" };
   let html = "";
 
   for (const [g, t] of [[2, 1], [2, 2], [3, 1], [3, 2]]) {
@@ -639,66 +728,43 @@ function renderCatalog() {
     if (idx > selIdx) continue;
     const isCurrent = idx === selIdx;
     const inTerm = subjectData.filter((s) => s.grade === g && s.term === t);
-    const chips = areaOrder
-      .map((area) => {
-        const items = inTerm.filter((s) => s.area === area);
-        if (!items.length) return "";
-        const chipHtml = items
-          .map((s) => {
-            const taken = !isCurrent && takenNames.has(s.name);
-            const cancelled = isCurrent && cancelledKeys.has(cancelKey(g, t, s.name));
-            const cls = `cat-chip${taken ? " is-taken" : ""}${cancelled ? " is-cancelled" : ""}`;
-            return `<button type="button" class="${cls}" data-grade="${g}" data-term="${t}" data-name="${s.name}" data-current="${isCurrent}">${s.name}(${s.credit})${s.ap ? "*" : ""}</button>`;
-          })
-          .join("");
-        return `<div class="cat-area"><span class="cat-area__name">${area}</span><div class="cat-chips">${chipHtml}</div></div>`;
-      })
-      .join("");
-    const label = isCurrent ? `${g}학년 ${t}학기 · 이번 학기 (폐강 과목은 우클릭)` : `${g}학년 ${t}학기 · 들은 과목은 클릭`;
+    const chips = AREA_ORDER.map((area) => {
+      const items = inTerm.filter((s) => s.area === area);
+      if (!items.length) return "";
+      const chipHtml = items
+        .map((s) => {
+          const taken = !isCurrent && takenNames.has(s.name);
+          // 이전 학기에 이미 들은 과목이 이번 학기에 또 열려 있으면 어차피 추천에서 빠지므로 눌러도 바뀌지 않게 한다.
+          const done = isCurrent && priorNames.has(s.name) && takenNames.has(s.name);
+          const state = isCurrent && !done ? prefState(g, t, s.name) : "none";
+          const cls = `cat-chip${taken ? " is-taken" : ""}${done ? " is-done" : ""}${stateCls[state]}`;
+          const title = done ? "이미 들은 과목이라 추천에서 빠져요" : stateTitle[state];
+          return `<button type="button" class="${cls}" data-grade="${g}" data-term="${t}" data-name="${escapeHtml(s.name)}" data-current="${isCurrent}" data-mandatory="${s.mandatory ? 1 : 0}"${title ? ` title="${title}"` : ""}>${escapeHtml(s.name)}(${s.credit})${s.ap ? "*" : ""}</button>`;
+        })
+        .join("");
+      return `<div class="cat-area"><span class="cat-area__name">${area}</span><div class="cat-chips">${chipHtml}</div></div>`;
+    }).join("");
+    const label = isCurrent ? `${g}학년 ${t}학기 · 이번 학기` : `${g}학년 ${t}학기 · 들은 과목은 클릭`;
     html += `<div class="cat-term${isCurrent ? " is-current" : ""}"><div class="cat-term__title">${label}</div>${chips}</div>`;
   }
   catalogEl.innerHTML = html;
 }
 
-function toggleCancelled(chip) {
-  const { grade, term, name } = chip.dataset;
-  const key = cancelKey(grade, term, name);
-  if (cancelledKeys.has(key)) cancelledKeys.delete(key);
-  else cancelledKeys.add(key);
-  chip.classList.toggle("is-cancelled");
-}
-
 catalogEl.addEventListener("click", (e) => {
   const chip = e.target.closest(".cat-chip");
-  if (!chip || chip.dataset.current === "true") return;
-  if (takenNames.has(chip.dataset.name)) takenNames.delete(chip.dataset.name);
-  else takenNames.add(chip.dataset.name);
+  if (!chip || chip.classList.contains("is-done")) return;
+  const { grade, term, name } = chip.dataset;
+  if (chip.dataset.current === "true") {
+    const g = Number(grade);
+    const t = Number(term);
+    applyPrefState(g, t, name, nextPrefState(prefState(g, t, name), chip.dataset.mandatory === "1"));
+  } else if (takenNames.has(name)) {
+    takenNames.delete(name);
+  } else {
+    takenNames.add(name);
+  }
   renderCatalog(); // 같은 이름의 과목이 다른 학기 칸에도 있으면 함께 표시를 바꾼다
 });
-
-catalogEl.addEventListener("contextmenu", (e) => {
-  const chip = e.target.closest(".cat-chip");
-  if (!chip || chip.dataset.current !== "true") return;
-  e.preventDefault();
-  toggleCancelled(chip);
-});
-
-// 모바일은 우클릭이 없으므로 길게 누르면 폐강 표시 (contextmenu와 중복되지 않도록 시간 간격으로 막는다)
-let pressTimer = null;
-let lastToggleAt = 0;
-catalogEl.addEventListener("touchstart", (e) => {
-  const chip = e.target.closest(".cat-chip");
-  if (!chip || chip.dataset.current !== "true") return;
-  pressTimer = setTimeout(() => {
-    if (Date.now() - lastToggleAt > 800) {
-      lastToggleAt = Date.now();
-      toggleCancelled(chip);
-    }
-  }, 500);
-}, { passive: true });
-["touchend", "touchmove", "touchcancel"].forEach((ev) =>
-  catalogEl.addEventListener(ev, () => clearTimeout(pressTimer), { passive: true })
-);
 
 document.getElementById("select-grade").addEventListener("change", renderCatalog);
 document.getElementById("select-term").addEventListener("change", renderCatalog);
@@ -724,15 +790,16 @@ submitBtn.addEventListener("click", () => {
     subjectData.filter((s) => termIndex(s.grade, s.term) < selIdx).map((s) => s.name)
   );
   const completed = new Set([...takenNames].filter((n) => priorNames.has(n)));
-  const cancelled = new Set(
-    [...cancelledKeys].filter((k) => k.startsWith(`${grade}-${term}|`)).map((k) => k.split("|")[1])
-  );
+  const prefix = `${grade}-${term}|`;
+  const cancelled = new Set([...cancelledKeys].filter((k) => k.startsWith(prefix)).map(keyName));
+  const must = new Set([...mustKeys].filter((k) => k.startsWith(prefix)).map(keyName).filter((n) => !completed.has(n)));
+  const never = new Set(neverNames);
 
   // 실제 계산은 짧게 지연시켜 로딩 화면이 보이도록 한다.
   Promise.all([subjectsReady, ratingsReady, new Promise((r) => setTimeout(r, 900))]).then(() => {
     // 여러 안을 만들어보고 졸업 기준(담을 수 있었는데 0학점인 영역)을 어기는 안은 버린 뒤,
     // 기준을 통과한 안 중에서 최종 2개를 고른다.
-    const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled);
+    const plans = generatePlans(grade, term, interests, dislikeTerms, apPreferred, completed, cancelled, { must, never });
 
     resultContent.innerHTML =
       renderGraduationRef(gradContext(grade, term, completed)) +
@@ -753,6 +820,10 @@ document.getElementById("btn-restart").addEventListener("click", () => {
   dislikeList.innerHTML = "";
   takenNames.clear();
   cancelledKeys.clear();
+  mustKeys.clear();
+  neverNames.clear();
+  resetCatalogToBase();
+  rvTerm = "2-1";
   renderCatalog();
   photos.length = 0;
   renderPhotoGrid();
@@ -766,7 +837,7 @@ updateSubmitState();
 updateUploadState();
 
 // ── 넓은 화면 양옆 패널: 입력 요약 / 과목 검색 ──────────────────────
-const stepNames = { "screen-start": "시작", "screen-upload": "① 사진 업로드", "screen-input": "② 정보 입력", "screen-loading": "추천 계산 중", "screen-result": "③ 추천 결과", "screen-write": "후기 남기기", "screen-reviews": "후기 열람" };
+const stepNames = { "screen-start": "시작", "screen-upload": "① 사진 업로드", "screen-review": "② 수강신청표 확인", "screen-input": "③ 정보 입력", "screen-loading": "추천 계산 중", "screen-result": "④ 추천 결과", "screen-write": "후기 남기기", "screen-reviews": "후기 열람" };
 
 function tagsHtml(list, bad) {
   if (!list.length) return '<span class="summary__empty">없음</span>';
@@ -786,6 +857,9 @@ function updateSummary() {
   document.getElementById("sum-photos").textContent = `${photos.length}장`;
   document.getElementById("sum-taken").textContent = `${takenCount}개`;
   document.getElementById("sum-cancelled").textContent = `${cancelledCount}개`;
+  document.getElementById("sum-must").textContent = `${[...mustKeys].filter((k) => k.startsWith(`${grade}-${term}|`)).length}개`;
+  document.getElementById("sum-never").textContent = `${neverNames.size}개`;
+  document.getElementById("sum-edits").textContent = `${catalogEditCount()}건`;
   document.getElementById("sum-ap").textContent = apToggle.classList.contains("on") ? "켜짐" : "꺼짐";
   document.getElementById("sum-interests").innerHTML = tagsHtml(
     Array.from(document.querySelectorAll(".chip.selected")).map((c) => c.dataset.tag)
@@ -1029,7 +1103,7 @@ let writeSelected = null;
 let writeRating = 0;
 
 function uniqueSubjectNames() {
-  return [...new Set(subjectData.map((s) => s.name))];
+  return [...new Set(baseSubjects.map((s) => s.name))];
 }
 
 // 사용자가 친 과목명을 정리한다: 공백 정리 + 30자 제한 + (띄어쓰기/대소문자만 다르면) 목록의 과목명으로 맞춤
@@ -1189,7 +1263,7 @@ function renderReviews() {
   const t = cleanTeacher(reviewsTeacher.value);
   const area = reviewsArea.value;
   const areaOf = {};
-  subjectData.forEach((s) => (areaOf[s.name] = areaOf[s.name] || s.area));
+  baseSubjects.forEach((s) => (areaOf[s.name] = areaOf[s.name] || s.area));
 
   const rows = reviewsData.filter(
     (r) =>
@@ -1371,3 +1445,328 @@ function finishDrawerDrag() {
 }
 document.addEventListener("pointerup", finishDrawerDrag);
 document.addEventListener("pointercancel", finishDrawerDrag);
+
+// ── 수강신청표 확인·수정 화면 ──────────────────────────────────
+// 추천을 만들기 전에 과목 목록을 사용자가 한 번 확인하고 틀린 곳을 직접 고치게 해서, 잘못 옮겨진 과목이 추천에 섞이는 걸 막는다.
+// (지금은 사진 글자를 자동으로 읽지 않고 학교 수강신청표 데이터를 불러와 보여준다. 자동 인식이 붙어도 이 화면에서 같은 방식으로 고친다.)
+const TERM_LIST = [[2, 1], [2, 2], [3, 1], [3, 2]];
+const rvTabs = document.getElementById("review-tabs");
+const rvList = document.getElementById("review-list");
+const rvSummary = document.getElementById("review-summary");
+const rvPhotos = document.getElementById("review-photos");
+let rvTerm = "2-1";
+let uidSeq = 0;
+
+function resetCatalogToBase() {
+  subjectData = baseSubjects.map(cloneSubject);
+  catalogDeleted = 0;
+}
+
+// 선이수 입력칸 자동완성에 쓰는 과목 이름 목록
+function refreshNameList() {
+  const names = [...new Set(subjectData.map((s) => s.name))];
+  document.getElementById("subject-names").innerHTML = names.map((n) => `<option value="${escapeHtml(n)}">`).join("");
+}
+
+function refreshAfterCatalogChange() {
+  refreshNameList();
+  renderReviewTabs();
+  renderReviewList();
+  renderSearch();
+  renderCatalog();
+  updateSummary();
+}
+
+function renderReviewPhotos() {
+  rvPhotos.hidden = photos.length === 0;
+  rvPhotos.innerHTML = photos.length
+    ? photos
+        .map((p, i) => `<button type="button" class="review-photo" data-id="${p.id}" aria-label="사진 ${i + 1} 크게 보기"><img src="${p.dataUrl}" alt="수강신청표 사진 ${i + 1}"><span>${i + 1}</span></button>`)
+        .join("") + '<span class="review-photos__hint">눌러서 크게 보면서<br>목록과 비교해 보세요</span>'
+    : "";
+}
+
+function renderReviewTabs() {
+  rvTabs.innerHTML = TERM_LIST.map(([g, t]) => {
+    const key = `${g}-${t}`;
+    const n = subjectData.filter((s) => s.grade === g && s.term === t).length;
+    return `<button type="button" class="term-tab${key === rvTerm ? " is-active" : ""}" data-term="${key}">${g}학년 ${t}학기<span>${n}</span></button>`;
+  }).join("");
+}
+
+function renderReviewList() {
+  const [g, t] = rvTerm.split("-").map(Number);
+  const items = subjectData.filter((s) => s.grade === g && s.term === t);
+  const credits = items.reduce((sum, s) => sum + s.credit, 0);
+  const edits = catalogEditCount();
+  rvSummary.textContent = `${items.length}과목 · 학점 합계 ${credits}` + (edits ? ` · 지금까지 고친 곳 ${edits}건` : "");
+
+  const body = AREA_ORDER.map((area) => {
+    const rows = items.filter((s) => s.area === area);
+    if (!rows.length) return "";
+    const rowsHtml = rows
+      .map((s) => {
+        const badge =
+          s._edit === "added" ? '<span class="rv-badge is-new">추가됨</span>' : s._edit === "edited" ? '<span class="rv-badge">수정됨</span>' : "";
+        const meta = [
+          `${s.credit}학점`,
+          s.ap ? `AP(시수 ${s.credit + 1})` : "",
+          s.requires ? `선이수 ${escapeHtml(s.requires)}` : "",
+          s.mandatory ? "필수" : "",
+          s.group ? "택일" : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<button type="button" class="rv-row" data-id="${escapeHtml(s.id)}"><span class="rv-row__main"><span class="rv-row__name">${escapeHtml(s.name)}</span>${badge}</span><span class="rv-row__meta">${meta}</span><span class="rv-row__edit">고치기 ›</span></button>`;
+      })
+      .join("");
+    return `<div class="rv-area"><div class="rv-area__name">${area}</div>${rowsHtml}</div>`;
+  }).join("");
+  rvList.innerHTML = body || '<p class="reviews-empty">이 학기에는 과목이 없어요. "+ 과목 추가"로 넣어주세요.</p>';
+}
+
+function openReviewScreen() {
+  refreshNameList();
+  renderReviewPhotos();
+  renderReviewTabs();
+  renderReviewList();
+  showScreen("review");
+}
+
+rvTabs.addEventListener("click", (e) => {
+  const b = e.target.closest(".term-tab");
+  if (!b) return;
+  rvTerm = b.dataset.term;
+  renderReviewTabs();
+  renderReviewList();
+});
+rvList.addEventListener("click", (e) => {
+  const r = e.target.closest(".rv-row");
+  if (r) openEditor(r.dataset.id);
+});
+document.getElementById("review-add").addEventListener("click", () => openEditor(null));
+document.getElementById("btn-review-next").addEventListener("click", () => {
+  renderCatalog();
+  showScreen("input");
+});
+document.getElementById("btn-edit-catalog").addEventListener("click", () => subjectsReady.then(openReviewScreen));
+
+// 사진 크게 보기(수강신청표와 목록을 비교할 때 쓴다)
+const lightbox = document.getElementById("photo-lightbox");
+const lightboxImg = document.getElementById("lightbox-img");
+function openLightbox(src) {
+  lightboxImg.src = src;
+  lightboxImg.classList.remove("is-zoom");
+  lightbox.hidden = false;
+}
+function closeLightbox() {
+  lightbox.hidden = true;
+}
+rvPhotos.addEventListener("click", (e) => {
+  const b = e.target.closest(".review-photo");
+  const p = b && photos.find((x) => x.id === b.dataset.id);
+  if (p) openLightbox(p.dataUrl);
+});
+lightboxImg.addEventListener("click", () => lightboxImg.classList.toggle("is-zoom"));
+document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+
+// 과목 고치기 / 추가 / 삭제
+const edSheet = document.getElementById("ed-sheet");
+const edDeleteBtn = document.getElementById("ed-delete");
+const edMsg = document.getElementById("ed-msg");
+let edTarget = null; // 고치는 과목의 id (null이면 새로 추가)
+let edDeleteArmed = false;
+let edDeleteTimer = null;
+
+AREA_ORDER.forEach((a) => document.getElementById("ed-area").add(new Option(a, a)));
+
+function setEdMsg(text, isError) {
+  edMsg.textContent = text;
+  edMsg.classList.toggle("is-error", !!isError);
+}
+
+function disarmDelete() {
+  edDeleteArmed = false;
+  clearTimeout(edDeleteTimer);
+  edDeleteBtn.textContent = "삭제";
+  edDeleteBtn.classList.remove("is-armed");
+}
+
+function openEditor(id) {
+  const s = id ? subjectData.find((x) => x.id === id) : null;
+  edTarget = s ? s.id : null;
+  const [tg, tt] = rvTerm.split("-").map(Number);
+  document.getElementById("ed-title").textContent = s ? "과목 고치기" : "과목 추가";
+  document.getElementById("ed-name").value = s ? s.name : "";
+  document.getElementById("ed-credit").value = String(s ? s.credit : 2);
+  document.getElementById("ed-area").value = s ? s.area : AREA_ORDER[0];
+  document.getElementById("ed-grade").value = String(s ? s.grade : tg);
+  document.getElementById("ed-term").value = String(s ? s.term : tt);
+  document.getElementById("ed-requires").value = s && s.requires ? s.requires : "";
+  document.getElementById("ed-ap").checked = !!(s && s.ap);
+  document.getElementById("ed-info").textContent = s
+    ? [s.mandatory ? "필수 과목: 선택지 없이 모든 안에 자동으로 들어가요." : "", s.group ? "택일 과목: 같은 묶음에서 정해진 개수만 골라요." : ""].filter(Boolean).join(" ")
+    : "새로 추가한 과목은 자유롭게 고르는 과목으로 들어가요.";
+  setEdMsg("");
+  disarmDelete();
+  edDeleteBtn.hidden = !s;
+  edSheet.hidden = false;
+}
+
+function closeEditor() {
+  edSheet.hidden = true;
+  edTarget = null;
+  disarmDelete();
+}
+
+function readEditor() {
+  const clean = (v) => v.trim().replace(/\s+/g, " ");
+  const d = {
+    name: clean(document.getElementById("ed-name").value),
+    credit: Number(document.getElementById("ed-credit").value),
+    area: document.getElementById("ed-area").value,
+    grade: Number(document.getElementById("ed-grade").value),
+    term: Number(document.getElementById("ed-term").value),
+    requires: clean(document.getElementById("ed-requires").value),
+    ap: document.getElementById("ed-ap").checked,
+    msg: "",
+  };
+  if (!d.name) d.msg = "과목 이름을 적어주세요.";
+  else if (/[<>"'&|`\\]/.test(d.name)) d.msg = "이름에 쓸 수 없는 문자(< > \" ' & | ` \\)가 있어요.";
+  else if (subjectData.some((s) => s.id !== edTarget && s.grade === d.grade && s.term === d.term && s.name === d.name))
+    d.msg = "같은 학기에 이미 있는 과목이에요.";
+  else if (d.requires && d.requires === d.name) d.msg = "자기 자신을 선이수 과목으로 둘 수 없어요.";
+  else if (d.requires && !subjectData.some((s) => s.id !== edTarget && s.name === d.requires))
+    d.msg = "선이수 과목이 목록에 없어요. 목록에 있는 이름을 골라주세요.";
+  return d;
+}
+
+// 과목 이름을 바꿨을 때 들은 과목·폐강·꼭/절대 표시·선이수가 새 이름을 따라가게 한다.
+// (같은 이름의 과목이 다른 학기에 남아 있으면 그 과목은 그대로이니 건드리지 않는다.)
+function renameRefs(oldName, newName) {
+  if (subjectData.some((s) => s.name === oldName)) return;
+  if (takenNames.delete(oldName)) takenNames.add(newName);
+  if (neverNames.delete(oldName)) neverNames.add(newName);
+  [cancelledKeys, mustKeys].forEach((set) => {
+    [...set].forEach((k) => {
+      if (keyName(k) === oldName) {
+        set.delete(k);
+        set.add(`${k.slice(0, k.indexOf("|"))}|${newName}`);
+      }
+    });
+  });
+  subjectData.forEach((s) => {
+    if (s.requires === oldName) s.requires = newName;
+  });
+}
+
+function saveEditor() {
+  const d = readEditor();
+  if (d.msg) {
+    setEdMsg(d.msg, true);
+    return;
+  }
+  const target = edTarget ? subjectData.find((x) => x.id === edTarget) : null;
+  if (target) {
+    const old = { name: target.name, grade: target.grade, term: target.term };
+    // 다른 학기로 옮겼다면 옛 학기에 걸어 둔 폐강/꼭 들음 표시는 지운다.
+    if (old.grade !== d.grade || old.term !== d.term) {
+      cancelledKeys.delete(cancelKey(old.grade, old.term, old.name));
+      mustKeys.delete(cancelKey(old.grade, old.term, old.name));
+    }
+    Object.assign(target, { name: d.name, credit: d.credit, ap: d.ap, area: d.area, grade: d.grade, term: d.term, requires: d.requires || null });
+    if (target._edit !== "added") target._edit = "edited";
+    if (old.name !== d.name) renameRefs(old.name, d.name);
+  } else {
+    subjectData.push({
+      id: `u${++uidSeq}`,
+      name: d.name,
+      credit: d.credit,
+      ap: d.ap,
+      area: d.area,
+      grade: d.grade,
+      term: d.term,
+      group: null,
+      mandatory: false,
+      requires: d.requires || null,
+      _edit: "added",
+    });
+  }
+  rvTerm = `${d.grade}-${d.term}`; // 고친 과목이 있는 학기 탭으로 보여준다
+  closeEditor();
+  refreshAfterCatalogChange();
+}
+
+function deleteSubject(id) {
+  const idx = subjectData.findIndex((s) => s.id === id);
+  if (idx < 0) return;
+  const [s] = subjectData.splice(idx, 1);
+  if (s._edit !== "added") catalogDeleted++;
+  cancelledKeys.delete(cancelKey(s.grade, s.term, s.name));
+  mustKeys.delete(cancelKey(s.grade, s.term, s.name));
+  if (!subjectData.some((x) => x.name === s.name)) {
+    takenNames.delete(s.name);
+    neverNames.delete(s.name);
+    // 지운 과목이 더는 없다면, 그 과목을 선이수로 걸어 둔 과목이 영원히 못 들어가지 않도록 선이수를 비운다.
+    subjectData.forEach((x) => {
+      if (x.requires === s.name) {
+        x.requires = null;
+        x._edit ||= "edited";
+      }
+    });
+  }
+}
+
+document.getElementById("ed-save").addEventListener("click", saveEditor);
+document.getElementById("ed-close").addEventListener("click", closeEditor);
+edSheet.addEventListener("click", (e) => {
+  if (e.target === edSheet) closeEditor();
+});
+edSheet.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type === "text") {
+    e.preventDefault();
+    saveEditor();
+  }
+});
+edDeleteBtn.addEventListener("click", () => {
+  if (!edTarget) return;
+  if (!edDeleteArmed) {
+    edDeleteArmed = true;
+    edDeleteBtn.textContent = "한 번 더 누르면 삭제돼요";
+    edDeleteBtn.classList.add("is-armed");
+    clearTimeout(edDeleteTimer);
+    edDeleteTimer = setTimeout(disarmDelete, 3000);
+    return;
+  }
+  deleteSubject(edTarget);
+  closeEditor();
+  refreshAfterCatalogChange();
+});
+
+// 목록 전체를 처음 상태(학교 원본)로 되돌리기: 실수로 누르지 않도록 한 번 더 확인한다.
+const rvResetBtn = document.getElementById("review-reset");
+let rvResetArmed = false;
+let rvResetTimer = null;
+function disarmReset() {
+  rvResetArmed = false;
+  clearTimeout(rvResetTimer);
+  rvResetBtn.textContent = "원래대로 되돌리기";
+}
+rvResetBtn.addEventListener("click", () => {
+  if (!rvResetArmed) {
+    rvResetArmed = true;
+    rvResetBtn.textContent = "고친 내용이 모두 사라져요. 한 번 더 누르세요";
+    clearTimeout(rvResetTimer);
+    rvResetTimer = setTimeout(disarmReset, 3000);
+    return;
+  }
+  disarmReset();
+  resetCatalogToBase();
+  refreshAfterCatalogChange();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  closeEditor();
+  closeLightbox();
+});

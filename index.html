@@ -22,6 +22,9 @@
       <div class="summary__row"><dt>수강신청표 사진</dt><dd id="sum-photos">0장</dd></div>
       <div class="summary__row"><dt>들은 과목</dt><dd id="sum-taken">0개</dd></div>
       <div class="summary__row"><dt>폐강 과목</dt><dd id="sum-cancelled">0개</dd></div>
+      <div class="summary__row"><dt>꼭 들을 과목</dt><dd id="sum-must">0개</dd></div>
+      <div class="summary__row"><dt>절대 안 들을 과목</dt><dd id="sum-never">0개</dd></div>
+      <div class="summary__row"><dt>수강신청표 수정</dt><dd id="sum-edits">0건</dd></div>
       <div class="summary__row"><dt>AP 선호</dt><dd id="sum-ap">꺼짐</dd></div>
     </dl>
     <div class="summary__block">
@@ -37,7 +40,8 @@
   <div class="side-card">
     <div class="side-card__title">추천 규칙</div>
     <ul class="rule-list">
-      <li>이미 들은 과목과 폐강 과목은 추천에서 빠져요.</li>
+      <li>이미 들은 과목, 폐강, 절대 안 들을 과목은 추천에서 빠져요.</li>
+      <li>꼭 들을 과목은 모든 안에 넣어요(선이수 과목도 같이).</li>
       <li>Ⅱ과목·물리/화학 실험은 선이수 조건을 따져요.</li>
       <li><b>*</b> 표시 AP 과목은 학점보다 주 1시수가 더 들어요.</li>
       <li>일주일은 36시수예요. 남는 시수가 공강이에요.</li>
@@ -123,10 +127,12 @@
       <div class="step-dot"><span>2</span></div>
       <div class="step-line"></div>
       <div class="step-dot"><span>3</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>4</span></div>
     </div>
 
     <h2 class="screen-title">수강신청표를 올려주세요</h2>
-    <p class="screen-subtitle">학교에서 나눠준 수강신청표를 사진으로 올려주시면 어떤 과목이 개설되는지 확인하는 데 사용해요. 뒷면이 있다면 모두 올려주세요.</p>
+    <p class="screen-subtitle">학교에서 나눠준 수강신청표를 사진으로 올려주세요. 다음 화면에서 과목 목록과 비교하며 틀린 곳을 고칠 수 있어요. 뒷면이 있다면 모두 올려주세요.</p>
 
     <input type="file" id="photo-input" accept="image/*" multiple hidden>
 
@@ -143,10 +149,11 @@
     <button type="button" id="btn-skip-upload" class="link-btn link-btn--center">사진이 없어요, 건너뛸게요</button>
   </section>
 
-  <!-- 화면 3: 입력 화면 -->
-  <section id="screen-input" class="screen">
+  <!-- 화면 3: 수강신청표 확인·수정 -->
+  <section id="screen-review" class="screen">
     <header class="topbar">
       <span class="logo">DSHS CRR</span>
+      <button type="button" class="link-btn" data-go="upload">이전</button>
     </header>
 
     <div class="step-indicator">
@@ -155,6 +162,41 @@
       <div class="step-dot is-active"><span>2</span></div>
       <div class="step-line"></div>
       <div class="step-dot"><span>3</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>4</span></div>
+    </div>
+
+    <h2 class="screen-title">수강신청표 확인</h2>
+    <p class="screen-subtitle">과목 목록이 사진과 같은지 확인하고, 틀린 과목은 눌러서 직접 고쳐주세요. 고친 목록으로 추천하니까 잘못된 과목이 추천에 섞이지 않아요.</p>
+
+    <div id="review-photos" class="review-photos" hidden></div>
+    <p class="review-note">※ 사진 속 글자를 자동으로 읽는 기능은 아직 없어요. 지금 목록은 학교 수강신청표 데이터에서 불러왔어요. 사진과 다른 곳이 있으면 직접 고쳐주세요.</p>
+
+    <div id="review-tabs" class="term-tabs"></div>
+    <div id="review-summary" class="rv-summary"></div>
+    <div id="review-list" class="review-list"></div>
+
+    <div class="review-actions">
+      <button type="button" id="review-add" class="btn-soft">+ 과목 추가</button>
+      <button type="button" id="review-reset" class="link-btn">원래대로 되돌리기</button>
+    </div>
+    <button type="button" id="btn-review-next" class="btn btn--primary btn--wide">이 목록으로 계속</button>
+  </section>
+
+  <!-- 화면 4: 입력 화면 -->
+  <section id="screen-input" class="screen">
+    <header class="topbar">
+      <span class="logo">DSHS CRR</span>
+    </header>
+
+    <div class="step-indicator">
+      <div class="step-dot is-done"><span>✓</span></div>
+      <div class="step-line is-done"></div>
+      <div class="step-dot is-done"><span>✓</span></div>
+      <div class="step-line is-done"></div>
+      <div class="step-dot is-active"><span>3</span></div>
+      <div class="step-line"></div>
+      <div class="step-dot"><span>4</span></div>
     </div>
 
     <div class="form-card">
@@ -173,11 +215,18 @@
       </div>
 
       <div class="field-group">
-        <label class="field-label">수강신청표 <span class="field-hint">들은 과목 · 폐강 과목 표시</span></label>
+        <label class="field-label">수강신청표 <span class="field-hint">들은 · 폐강 · 꼭 · 절대 안</span></label>
         <p class="field-note">
-          <b>이전 학기</b> 과목은 <b>클릭</b>해서 들은 과목으로 표시하세요. 추천에서 빠지고, Ⅱ과목·실험과목의 선이수 조건도 채워져요.
-          <b>이번 학기</b> 과목은 폐강된 것을 <b>우클릭</b>(모바일은 길게 누르기)하면 추천에서 빠져요.
+          <b>이전 학기</b> 과목은 <b>클릭</b>하면 들은 과목으로 표시돼요. 추천에서 빠지고, Ⅱ과목·실험과목의 선이수 조건도 채워져요.<br>
+          <b>이번 학기</b> 과목은 <b>클릭할 때마다</b> 바뀌어요.
         </p>
+        <div class="cat-legend">
+          <span class="lg lg--cancelled">1번 클릭 · 폐강</span>
+          <span class="lg lg--must">2번 · 꼭 들을 과목</span>
+          <span class="lg lg--never">3번 · 절대 안 들을 과목</span>
+          <span class="lg lg--plain">4번 · 해제</span>
+        </div>
+        <button type="button" id="btn-edit-catalog" class="link-btn link-btn--left">목록이 사진과 다른가요? 수강신청표 고치기 ›</button>
         <button type="button" id="btn-open-rate" class="btn-rate" hidden>★ 들은 과목 평가하기</button>
         <div id="catalog" class="catalog"></div>
       </div>
@@ -304,6 +353,48 @@
     </div>
   </div>
 
+  <!-- 과목 고치기 / 추가 (아래에서 올라오는 창) -->
+  <div id="ed-sheet" class="sheet" hidden>
+    <div class="sheet__panel" role="dialog" aria-label="과목 고치기">
+      <div class="sheet__head">
+        <span id="ed-title" class="sheet__title">과목 고치기</span>
+        <button type="button" id="ed-close" class="link-btn">닫기</button>
+      </div>
+      <div class="ed-grid">
+        <label class="ed-field ed-field--wide"><span>과목 이름</span>
+          <input id="ed-name" class="text-input" type="text" maxlength="30" autocomplete="off"></label>
+        <label class="ed-field"><span>학점</span>
+          <select id="ed-credit" class="select">
+            <option value="1">1학점</option><option value="2">2학점</option><option value="3">3학점</option>
+            <option value="4">4학점</option><option value="5">5학점</option><option value="6">6학점</option>
+          </select></label>
+        <label class="ed-field"><span>영역</span>
+          <select id="ed-area" class="select"></select></label>
+        <label class="ed-field"><span>학년</span>
+          <select id="ed-grade" class="select"><option value="2">2학년</option><option value="3">3학년</option></select></label>
+        <label class="ed-field"><span>학기</span>
+          <select id="ed-term" class="select"><option value="1">1학기</option><option value="2">2학기</option></select></label>
+        <label class="ed-field ed-field--wide"><span>선이수 과목 (없으면 비워두세요)</span>
+          <input id="ed-requires" class="text-input" type="text" list="subject-names" maxlength="30" autocomplete="off" placeholder="예: 일반물리학Ⅰ"></label>
+        <label class="ed-check ed-field--wide"><input id="ed-ap" type="checkbox"> AP 과목(*) · 학점보다 주 1시수가 더 들어요</label>
+      </div>
+      <p id="ed-info" class="field-note"></p>
+      <p id="ed-msg" class="rate-msg"></p>
+      <div class="ed-actions">
+        <button type="button" id="ed-delete" class="ed-delete">삭제</button>
+        <button type="button" id="ed-save" class="rate-submit">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 올린 사진 크게 보기 -->
+  <div id="photo-lightbox" class="lightbox" hidden>
+    <button type="button" id="lightbox-close" class="lightbox__close" aria-label="닫기">✕</button>
+    <div class="lightbox__scroll"><img id="lightbox-img" alt="수강신청표 사진 확대"></div>
+    <p class="lightbox__hint">사진을 누르면 확대/축소돼요</p>
+  </div>
+
+  <datalist id="subject-names"></datalist>
   <datalist id="teacher-suggest"></datalist>
   <datalist id="teacher-suggest-all"></datalist>
 </div>
